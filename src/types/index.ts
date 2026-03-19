@@ -120,6 +120,7 @@ export interface SearchIntent {
 export interface SearchResult {
   company: Company
   relevance_score: number
+  exa_score: number
   match_reasons: string[]
   // From Exa
   snippet: string | null

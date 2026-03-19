@@ -91,12 +91,35 @@ function cleanCompanyName(title: string, domain: string): string {
   return domainToName(domain)
 }
 
+/** Detect direct company lookups like "Microsoft", "Stripe", "Google" vs discovery queries */
+function isDirectCompanyLookup(query: string): boolean {
+  const words = query.trim().split(/\s+/)
+  if (words.length === 0 || words.length > 3) return false
+  // Must start with a capital letter (proper noun / company name)
+  if (!/^[A-Z]/.test(words[0])) return false
+  // If any word is a discovery/filter term, it's not a direct lookup
+  const discoveryTerms = new Set([
+    'hiring', 'startup', 'startups', 'series', 'seed', 'ai', 'ml',
+    'nyc', 'remote', 'engineer', 'engineers', 'engineering',
+    'companies', 'company', 'funded', 'funding', 'growth',
+    'saas', 'fintech', 'healthtech', 'devtools', 'crypto',
+    'b2b', 'b2c', 'enterprise', 'consumer', 'climate',
+  ])
+  for (const w of words) {
+    if (discoveryTerms.has(w.toLowerCase())) return false
+  }
+  return true
+}
+
 export async function searchCompanies(keywords: string[]): Promise<CompanySearchResult[]> {
-  const query = keywords.join(' ') + ' company startup'
+  const rawQuery = keywords.join(' ')
+  const directLookup = isDirectCompanyLookup(rawQuery)
+  const query = directLookup ? `"${rawQuery}"` : `${rawQuery} company startup`
+  const numResults = directLookup ? 10 : 25
 
   const data = await exaRequest('/search', {
     query,
-    numResults: 25, // fetch more to allow for dedup
+    numResults, // fetch more to allow for dedup
     type: 'neural',
     useAutoprompt: true,
     excludeDomains: [

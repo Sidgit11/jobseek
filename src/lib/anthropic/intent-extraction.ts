@@ -12,9 +12,40 @@ const SearchIntentSchema = z.object({
   keywords: z.array(z.string()),
 })
 
+/** Detect if query is a direct company name lookup (1-2 words, no filter terms) */
+function isDirectNameQuery(rawQuery: string): boolean {
+  const words = rawQuery.trim().split(/\s+/)
+  if (words.length === 0 || words.length > 2) return false
+  if (!/^[A-Z]/.test(words[0])) return false
+  const filterTerms = new Set([
+    'hiring', 'startup', 'startups', 'series', 'seed', 'ai', 'ml',
+    'nyc', 'remote', 'engineer', 'engineers', 'companies', 'company',
+    'funded', 'funding', 'growth', 'saas', 'fintech', 'healthtech',
+    'devtools', 'crypto', 'b2b', 'b2c', 'enterprise', 'consumer', 'climate',
+  ])
+  for (const w of words) {
+    if (filterTerms.has(w.toLowerCase())) return false
+  }
+  return true
+}
+
 /** Pure regex / keyword heuristic — zero API calls, always works */
 function heuristicIntent(rawQuery: string, userContext: CandidateContext): SearchIntent {
   const q = rawQuery.toLowerCase()
+
+  // For direct company name queries (e.g. "Microsoft", "Stripe"), keep keywords
+  // minimal and don't add default discovery filters
+  if (isDirectNameQuery(rawQuery)) {
+    return {
+      industries: userContext.targetIndustries.length ? userContext.targetIndustries : [],
+      fundingStages: [],
+      roles: userContext.targetRoles,
+      geography: userContext.location,
+      signals: [],
+      companySize: 'any',
+      keywords: [rawQuery.trim()],
+    }
+  }
 
   const stages: string[] = []
   if (q.includes('seed') || q.includes('pre-seed')) stages.push('seed')

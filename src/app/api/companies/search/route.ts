@@ -8,8 +8,15 @@ import { getDemoCompanies } from '@/lib/demo/companies'
 import { routeLogger } from '@/lib/logger'
 import type { Company, SearchResult, CandidateContext } from '@/types'
 
-function scoreCompany(company: Partial<Company>, intent: { signals: string[]; fundingStages: string[] }, snippet: string): number {
+function scoreCompany(company: Partial<Company>, intent: { signals: string[]; fundingStages: string[] }, snippet: string, rawQuery?: string): number {
   let score = 50 // base
+
+  // Name match bonus: if the company name contains the search query, boost strongly
+  if (rawQuery) {
+    const q = rawQuery.toLowerCase()
+    if (company.name && company.name.toLowerCase().includes(q)) score += 30
+    if (company.domain && company.domain.toLowerCase().includes(q)) score += 25
+  }
 
   // Funding stage match
   const fs = company.funding_stage?.toLowerCase() ?? ''
@@ -186,11 +193,12 @@ export async function POST(request: NextRequest) {
       }
       if (upsertError) log.warn(`DB upsert failed for ${r.domain}`, upsertError.message)
 
-      const score = scoreCompany(resolvedCompany, intent, r.snippet)
+      const score = scoreCompany(resolvedCompany, intent, r.snippet, query)
 
       results.push({
         company: resolvedCompany,
         relevance_score: score,
+        exa_score: r.score ?? 0,
         match_reasons: [],
         snippet: r.snippet,
         url: r.url,

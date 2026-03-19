@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { X, ExternalLink, Users, TrendingUp, Bookmark, BookmarkCheck, ChevronDown, AlertTriangle } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { X, ExternalLink, Users, TrendingUp, Bookmark, BookmarkCheck, ChevronDown, AlertTriangle, CheckCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { PersonCard } from './PersonCard'
 import { OutreachGenerator } from '@/components/outreach/OutreachGenerator'
@@ -19,6 +19,10 @@ interface CompanyPanelProps {
   overrideOutreach?: Record<string, { linkedin: string; email_subject: string; email_body: string }>
   /** Demo mode: personId → email revealed on "Find Email" click */
   overrideEmails?: Record<string, string>
+  /** Auto-trigger people loading when panel opens */
+  autoLoadPeople?: boolean
+  /** Callback for parent to trigger people loading */
+  onFindPeople?: () => void
 }
 
 interface Intelligence {
@@ -26,7 +30,20 @@ interface Intelligence {
   news: NewsItem[]
 }
 
-export function CompanyPanel({ result, onClose, onSave, saved, overrideIntel, overridePeople, overrideOutreach, overrideEmails }: CompanyPanelProps) {
+const fadeInUpKeyframes = `
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+`
+
+export function CompanyPanel({ result, onClose, onSave, saved, overrideIntel, overridePeople, overrideOutreach, overrideEmails, autoLoadPeople, onFindPeople }: CompanyPanelProps) {
   const [intel, setIntel] = useState<Intelligence | null>(overrideIntel ?? null)
   const [loading, setLoading] = useState(!overrideIntel)
   const [people, setPeople] = useState<Person[]>([])
@@ -37,6 +54,7 @@ export function CompanyPanel({ result, onClose, onSave, saved, overrideIntel, ov
   // Email reveal state: personId → revealed email string
   const [foundEmails, setFoundEmails] = useState<Record<string, string>>({})
   const [emailLoadingFor, setEmailLoadingFor] = useState<string | null>(null)
+  const autoLoadTriggered = useRef(false)
 
   const company = intel?.company ?? result.company
 
@@ -48,6 +66,7 @@ export function CompanyPanel({ result, onClose, onSave, saved, overrideIntel, ov
     setSelectedPerson(null)
     setFoundEmails({})
     setEmailLoadingFor(null)
+    autoLoadTriggered.current = false
 
     // Demo mode: use pre-baked data, skip API
     if (overrideIntel) return
@@ -60,6 +79,29 @@ export function CompanyPanel({ result, onClose, onSave, saved, overrideIntel, ov
       })
       .catch(() => setLoading(false))
   }, [result.company.id, overrideIntel])
+
+  // Auto-load people when autoLoadPeople prop is true
+  useEffect(() => {
+    if (autoLoadPeople && !autoLoadTriggered.current && !loading) {
+      autoLoadTriggered.current = true
+      // Trigger loadPeople without toggling off
+      setShowPeople(true)
+      if (people.length === 0) {
+        if (overridePeople) {
+          setPeople(overridePeople)
+        } else {
+          setPeopleLoading(true)
+          fetch(`/api/people/${result.company.id}`)
+            .then(r => r.json())
+            .then(data => {
+              setPeople(data.people ?? [])
+              setPeopleLoading(false)
+            })
+            .catch(() => setPeopleLoading(false))
+        }
+      }
+    }
+  }, [autoLoadPeople, loading, people.length, overridePeople, result.company.id])
 
   async function loadPeople() {
     if (showPeople) { setShowPeople(false); return }
@@ -140,11 +182,20 @@ export function CompanyPanel({ result, onClose, onSave, saved, overrideIntel, ov
     toast.success('Marked as messaged in pipeline')
   }
 
+  function handleFindPeopleClick() {
+    onFindPeople?.()
+    loadPeople()
+  }
+
   const domain = company.domain ?? ''
   const logoUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=64` : null
+  const peopleLoaded = people.length > 0 && showPeople
 
   return (
     <div className="flex h-full flex-col" style={{ background: 'var(--color-surface)' }}>
+      {/* Inject keyframes */}
+      <style>{fadeInUpKeyframes}</style>
+
       {/* Header */}
       <div
         className="flex items-start justify-between p-5 pb-4"
@@ -238,6 +289,80 @@ export function CompanyPanel({ result, onClose, onSave, saved, overrideIntel, ov
               </div>
             )}
 
+            {/* Key People — moved up to be right after Why This Fits You */}
+            <div>
+              <button
+                onClick={loadPeople}
+                className="flex w-full items-center justify-between rounded-xl px-4 py-3 text-sm font-medium transition-all"
+                style={{
+                  background: showPeople ? 'var(--color-lime-subtle)' : 'var(--color-surface)',
+                  border: `1px solid ${showPeople ? 'var(--color-lime-border)' : '#E8E8E3'}`,
+                  color: 'var(--color-text-primary)',
+                }}
+              >
+                <span>Key People{people.length > 0 ? ` (${people.length})` : ''}</span>
+                <ChevronDown
+                  size={16}
+                  style={{ color: 'var(--color-text-tertiary)', transform: showPeople ? 'rotate(180deg)' : undefined, transition: 'transform 0.2s' }}
+                />
+              </button>
+
+              {showPeople && (
+                <div className="mt-3 space-y-2">
+                  {peopleLoading ? (
+                    <div className="space-y-3">
+                      {[0, 1, 2].map(i => (
+                        <div key={i} className="rounded-xl p-4 animate-pulse" style={{ background: '#F0F0EC', animationDelay: `${i * 150}ms` }}>
+                          <div className="h-4 w-32 rounded bg-gray-200 mb-2" />
+                          <div className="h-3 w-48 rounded bg-gray-200" />
+                        </div>
+                      ))}
+                    </div>
+                  ) : people.length === 0 ? (
+                    <div className="rounded-xl p-4 text-center">
+                      <p className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No contacts found for this domain.</p>
+                      <p className="mt-1 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>Hunter.io has limited coverage for early-stage companies. Try searching LinkedIn directly.</p>
+                    </div>
+                  ) : (
+                    <>
+                      {people.map((person, index) => (
+                        <div
+                          key={person.id}
+                          style={{
+                            animation: 'fadeInUp 0.4s ease-out both',
+                            animationDelay: `${index * 100}ms`,
+                          }}
+                        >
+                          <PersonCard
+                            person={person}
+                            onGenerateOutreach={handleGenerateOutreach}
+                            loading={outreachLoading === person.id}
+                            onFindEmail={handleFindEmail}
+                            revealedEmail={foundEmails[person.id]}
+                            emailLoading={emailLoadingFor === person.id}
+                          />
+                          {selectedPerson?.id === person.id && (
+                            <div
+                              className="mt-2 rounded-xl p-4"
+                              style={{ background: 'var(--color-surface)', border: '1px solid #E8E8E3' }}
+                            >
+                              <OutreachGenerator
+                                person={person}
+                                company={company}
+                                onMarkSent={handleMarkSent}
+                                demoVariants={overrideOutreach?.[person.id]}
+                                revealedEmail={foundEmails[person.id] ?? person.email ?? undefined}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* Hiring Signals */}
             {company.hiring_signals && company.hiring_signals.length > 0 && (
               <div>
@@ -322,97 +447,47 @@ export function CompanyPanel({ result, onClose, onSave, saved, overrideIntel, ov
                 </div>
               </div>
             )}
-
-            {/* Key People */}
-            <div>
-              <button
-                onClick={loadPeople}
-                className="flex w-full items-center justify-between rounded-xl px-4 py-3 text-sm font-medium transition-all"
-                style={{
-                  background: showPeople ? 'var(--color-lime-subtle)' : 'var(--color-surface)',
-                  border: `1px solid ${showPeople ? 'var(--color-lime-border)' : '#E8E8E3'}`,
-                  color: 'var(--color-text-primary)',
-                }}
-              >
-                <span>Key People{people.length > 0 ? ` (${people.length})` : ''}</span>
-                <ChevronDown
-                  size={16}
-                  style={{ color: 'var(--color-text-tertiary)', transform: showPeople ? 'rotate(180deg)' : undefined, transition: 'transform 0.2s' }}
-                />
-              </button>
-
-              {showPeople && (
-                <div className="mt-3 space-y-2">
-                  {peopleLoading ? (
-                    <div className="py-4 text-center text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
-                      Finding decision makers…
-                    </div>
-                  ) : people.length === 0 ? (
-                    <div className="rounded-xl p-4 text-center">
-                      <p className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>No contacts found for this domain.</p>
-                      <p className="mt-1 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>Hunter.io has limited coverage for early-stage companies. Try searching LinkedIn directly.</p>
-                    </div>
-                  ) : (
-                    <>
-                      {people.map(person => (
-                        <div key={person.id}>
-                          <PersonCard
-                            person={person}
-                            onGenerateOutreach={handleGenerateOutreach}
-                            loading={outreachLoading === person.id}
-                            onFindEmail={handleFindEmail}
-                            revealedEmail={foundEmails[person.id]}
-                            emailLoading={emailLoadingFor === person.id}
-                          />
-                          {selectedPerson?.id === person.id && (
-                            <div
-                              className="mt-2 rounded-xl p-4"
-                              style={{ background: 'var(--color-surface)', border: '1px solid #E8E8E3' }}
-                            >
-                              <OutreachGenerator
-                                person={person}
-                                company={company}
-                                onMarkSent={handleMarkSent}
-                                demoVariants={overrideOutreach?.[person.id]}
-                                revealedEmail={foundEmails[person.id] ?? person.email ?? undefined}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
           </div>
         )}
       </div>
 
       {/* Sticky CTAs */}
       <div
-        className="flex gap-2 p-4"
+        className="flex flex-col gap-2 p-4"
         style={{ borderTop: '1px solid #E8E8E3', background: 'var(--color-surface)' }}
       >
+        {peopleLoaded ? (
+          <div
+            className="flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold"
+            style={{ background: 'rgba(34,197,94,0.12)', color: 'var(--color-success)', border: '1px solid rgba(34,197,94,0.25)' }}
+          >
+            <CheckCircle size={15} />
+            People loaded
+          </div>
+        ) : (
+          <button
+            onClick={handleFindPeopleClick}
+            className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-all"
+            style={{
+              background: 'var(--color-lime)',
+              color: '#1A2E05',
+              boxShadow: '0 0 16px var(--color-lime-subtle)',
+            }}
+          >
+            Find People &rarr;
+          </button>
+        )}
         <button
           onClick={handleSave}
-          className="flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition-all"
+          className="flex items-center justify-center gap-2 rounded-xl py-2 text-sm font-medium transition-all"
           style={{
-            background: saved ? 'rgba(34,197,94,0.12)' : 'var(--color-lime)',
-            color: saved ? 'var(--color-success)' : '#1A2E05',
-            border: saved ? '1px solid rgba(34,197,94,0.25)' : 'none',
-            boxShadow: saved ? 'none' : '0 0 16px var(--color-lime-subtle)',
+            background: saved ? 'rgba(34,197,94,0.12)' : 'transparent',
+            color: saved ? 'var(--color-success)' : 'var(--color-text-secondary)',
+            border: saved ? '1px solid rgba(34,197,94,0.25)' : '1px solid #E8E8E3',
           }}
         >
-          {saved ? <BookmarkCheck size={15} /> : <Bookmark size={15} />}
+          {saved ? <BookmarkCheck size={14} /> : <Bookmark size={14} />}
           {saved ? 'Saved' : 'Save to Pipeline'}
-        </button>
-        <button
-          onClick={loadPeople}
-          className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all"
-          style={{ background: '#E8E8E3', color: 'var(--color-text-secondary)' }}
-        >
-          Find People
         </button>
       </div>
     </div>

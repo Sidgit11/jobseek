@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, Suspense } from 'react'
+import { useState, useRef, useEffect, Suspense, useMemo } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Search, Sparkles, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -17,6 +17,26 @@ const SUGGESTED_QUERIES = [
   'Consumer apps with strong growth signals',
 ]
 
+type SortMode = 'fit' | 'relevance' | 'funding'
+
+const SORT_OPTIONS: { key: SortMode; label: string }[] = [
+  { key: 'fit', label: 'Ranked by fit' },
+  { key: 'relevance', label: 'By relevance' },
+  { key: 'funding', label: 'By funding' },
+]
+
+function parseFundingToNumber(funding: string | null): number {
+  if (!funding) return 0
+  const match = funding.match(/([\d.]+)\s*(B|M|K)?/i)
+  if (!match) return 0
+  const value = parseFloat(match[1])
+  const unit = (match[2] || '').toUpperCase()
+  if (unit === 'B') return value * 1_000_000_000
+  if (unit === 'M') return value * 1_000_000
+  if (unit === 'K') return value * 1_000
+  return value
+}
+
 function DiscoverPageInner() {
   const searchParams = useSearchParams()
   const initialQuery = searchParams.get('company') || searchParams.get('query') || ''
@@ -27,6 +47,8 @@ function DiscoverPageInner() {
   const [selectedResult, setSelectedResult] = useState<SearchResult | null>(null)
   const [savedCompanies, setSavedCompanies] = useState<Set<string>>(new Set())
   const [demoMode, setDemoMode] = useState(false)
+  const [sortMode, setSortMode] = useState<SortMode>('fit')
+  const [findPeopleOnOpen, setFindPeopleOnOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const hasAutoSearched = useRef(false)
 
@@ -38,6 +60,22 @@ function DiscoverPageInner() {
       handleSearch(initialQuery)
     }
   }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const sortedResults = useMemo(() => {
+    const sorted = [...results]
+    switch (sortMode) {
+      case 'fit':
+        sorted.sort((a, b) => b.relevance_score - a.relevance_score)
+        break
+      case 'relevance':
+        sorted.sort((a, b) => b.exa_score - a.exa_score)
+        break
+      case 'funding':
+        sorted.sort((a, b) => parseFundingToNumber(b.company.total_funding) - parseFundingToNumber(a.company.total_funding))
+        break
+    }
+    return sorted
+  }, [results, sortMode])
 
   async function handleSearch(q: string = query) {
     if (!q.trim()) return
@@ -85,6 +123,13 @@ function DiscoverPageInner() {
     // Just prefill — let the user edit and submit manually
     inputRef.current?.focus()
   }
+
+  function handleFindPeople(result: SearchResult) {
+    setSelectedResult(result)
+    setFindPeopleOnOpen(true)
+  }
+
+  const activeSortLabel = SORT_OPTIONS.find(o => o.key === sortMode)!.label.toLowerCase()
 
   return (
     <div className="flex h-screen" style={{ background: 'var(--color-bg)' }}>
@@ -186,7 +231,7 @@ function DiscoverPageInner() {
             <>
               <div className="mb-3 flex items-center justify-between">
                 <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                  {results.length} companies found · ranked by fit
+                  {sortedResults.length} companies found · {activeSortLabel}
                 </p>
                 {demoMode && (
                   <a
@@ -201,14 +246,34 @@ function DiscoverPageInner() {
                   </a>
                 )}
               </div>
+
+              {/* Sort controls */}
+              <div className="mb-3 flex gap-1.5">
+                {SORT_OPTIONS.map(opt => (
+                  <button
+                    key={opt.key}
+                    onClick={() => setSortMode(opt.key)}
+                    className="rounded-full px-3 py-1 text-[11px] font-medium transition-all"
+                    style={{
+                      background: sortMode === opt.key ? 'var(--color-text-primary)' : 'var(--color-surface)',
+                      color: sortMode === opt.key ? 'var(--color-surface)' : 'var(--color-text-secondary)',
+                      border: `1px solid ${sortMode === opt.key ? 'var(--color-text-primary)' : '#E8E8E3'}`,
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
               <div className="space-y-3">
-                {results.map(result => (
+                {sortedResults.map(result => (
                   <CompanyCard
                     key={result.company.id}
                     result={result}
                     active={selectedResult?.company.id === result.company.id}
                     onSelect={() => setSelectedResult(result)}
                     onSave={() => handleSave(result.company.id)}
+                    onFindPeople={() => handleFindPeople(result)}
                     saved={savedCompanies.has(result.company.id)}
                   />
                 ))}
@@ -223,9 +288,10 @@ function DiscoverPageInner() {
         <div className="flex-1 overflow-hidden">
           <CompanyPanel
             result={selectedResult}
-            onClose={() => setSelectedResult(null)}
+            onClose={() => { setSelectedResult(null); setFindPeopleOnOpen(false) }}
             onSave={handleSave}
             saved={savedCompanies.has(selectedResult.company.id)}
+            autoLoadPeople={findPeopleOnOpen}
           />
         </div>
       )}
