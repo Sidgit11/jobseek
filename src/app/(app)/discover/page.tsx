@@ -19,7 +19,8 @@ const SUGGESTED_QUERIES = [
 
 function DiscoverPageInner() {
   const searchParams = useSearchParams()
-  const [query, setQuery] = useState('')
+  const initialQuery = searchParams.get('company') || searchParams.get('query') || ''
+  const [query, setQuery] = useState(initialQuery)
   const [results, setResults] = useState<SearchResult[]>([])
   const [searching, setSearching] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
@@ -29,17 +30,12 @@ function DiscoverPageInner() {
   const inputRef = useRef<HTMLInputElement>(null)
   const hasAutoSearched = useRef(false)
 
-  // Handle URL params: ?company=Microsoft or ?query=AI startups
+  // Auto-search when arriving with URL params (?company=Microsoft or ?query=...)
   useEffect(() => {
     if (hasAutoSearched.current) return
-    const companyParam = searchParams.get('company')
-    const queryParam = searchParams.get('query')
-    const autoSearch = companyParam || queryParam
-    if (autoSearch) {
+    if (initialQuery) {
       hasAutoSearched.current = true
-      setQuery(autoSearch)
-      // Auto-search when coming from "Find People" link
-      setTimeout(() => handleSearch(autoSearch), 100)
+      handleSearch(initialQuery)
     }
   }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
