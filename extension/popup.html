@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Jobseek Signals</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #FAFAFB; width: 400px; max-height: 600px; overflow-y: auto; }
+
+    .header {
+      background: #4F46E5; color: white; padding: 14px 16px;
+      display: flex; justify-content: space-between; align-items: center;
+      position: sticky; top: 0; z-index: 10;
+    }
+    .header h1 { font-size: 15px; font-weight: 600; letter-spacing: -0.3px; }
+    .count { background: rgba(255,255,255,0.2); border-radius: 20px; padding: 2px 8px; font-size: 12px; }
+    .clear-btn { background: none; border: 1px solid rgba(255,255,255,0.4); color: white; padding: 4px 10px; border-radius: 6px; font-size: 11px; cursor: pointer; }
+    .clear-btn:hover { background: rgba(255,255,255,0.1); }
+    .pause-btn { background: none; border: 1px solid rgba(255,255,255,0.4); color: white; padding: 4px 10px; border-radius: 6px; font-size: 11px; cursor: pointer; }
+    .pause-btn:hover { background: rgba(255,255,255,0.1); }
+    .pause-btn.paused { background: rgba(239,68,68,0.25); border-color: rgba(239,68,68,0.6); }
+
+    .empty { padding: 40px 20px; text-align: center; color: #6B7280; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    .empty .icon { font-size: 32px; }
+    .empty p { font-size: 13px; line-height: 1.5; }
+    .empty .hint { font-size: 11px; color: #9CA3AF; }
+
+    .signal-card { background: white; margin: 8px 8px 0; border-radius: 10px; border: 1px solid #E5E7EB; padding: 12px 14px; cursor: pointer; transition: box-shadow 0.15s; }
+    .signal-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .signal-card:last-child { margin-bottom: 8px; }
+
+    .card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
+    .signal-badge { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.4px; }
+
+    /* Tier 1 */
+    .badge-JOB_CHANGE { background: #FEE2E2; color: #DC2626; }
+    .badge-HIRING_POST { background: #FEF3C7; color: #D97706; }
+    .badge-FUNDING_SIGNAL { background: #D1FAE5; color: #059669; }
+    /* Tier 2 */
+    .badge-DECISION_MAKER_ACTIVE { background: #DBEAFE; color: #1D4ED8; }
+    .badge-COMPANY_MILESTONE { background: #EDE9FE; color: #7C3AED; }
+    .badge-WARM_PATH_OPENED { background: #FEF3C7; color: #B45309; }
+
+    .card-meta { font-size: 11px; color: #9CA3AF; }
+    .card-author { font-size: 13px; font-weight: 600; color: #111827; margin-bottom: 2px; }
+    .card-title { font-size: 11px; color: #6B7280; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .card-reasoning { font-size: 11px; color: #6B7280; font-style: italic; margin-bottom: 6px; line-height: 1.4; }
+    .card-hook { font-size: 12px; color: #4F46E5; background: #EEF2FF; border-radius: 6px; padding: 6px 8px; margin-bottom: 8px; line-height: 1.4; }
+    .card-preview { font-size: 12px; color: #374151; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .degree-badge { display: inline-block; font-size: 10px; background: #F3F4F6; color: #6B7280; padding: 1px 5px; border-radius: 4px; margin-left: 4px; }
+    .confidence { font-size: 10px; color: #9CA3AF; }
+
+    .card-actions { display: flex; gap: 6px; margin-top: 10px; }
+    .btn-primary { flex: 1; background: #4F46E5; color: white; border: none; padding: 7px 12px; border-radius: 7px; font-size: 12px; font-weight: 500; cursor: pointer; }
+    .btn-primary:hover { background: #4338CA; }
+    .btn-secondary { background: none; border: 1px solid #E5E7EB; color: #6B7280; padding: 7px 12px; border-radius: 7px; font-size: 12px; cursor: pointer; }
+    .btn-secondary:hover { background: #F9FAFB; }
+
+    .tier-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+    .tier-1 { background: #DC2626; }
+    .tier-2 { background: #D97706; }
+
+    .scan-status { padding: 8px 16px; font-size: 11px; color: #9CA3AF; text-align: center; border-top: 1px solid #F3F4F6; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>⚡ Jobseek Signals</h1>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span class="count" id="count">0</span>
+      <button class="pause-btn" id="pauseBtn">⏸ Pause</button>
+      <button class="clear-btn" id="clearBtn">Clear all</button>
+    </div>
+  </div>
+  <div id="content"></div>
+  <div class="scan-status" id="scanStatus">Open LinkedIn to start scanning</div>
+  <script src="popup.js"></script>
+</body>
+</html>
