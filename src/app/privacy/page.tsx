@@ -28,7 +28,7 @@ export default function PrivacyPage() {
           </Section>
 
           <Section title="What data we collect">
-            <SubHeading>Web application (jobseek.ai)</SubHeading>
+            <SubHeading>Web application</SubHeading>
             <ul>
               <li>Email address — for authentication via magic link (Supabase Auth)</li>
               <li>Profile information you enter: name, target roles, industries, seniority level</li>
@@ -93,7 +93,7 @@ export default function PrivacyPage() {
               <li>Export your data in a portable format</li>
               <li>Withdraw consent at any time</li>
             </ul>
-            <p>To exercise any of these rights, contact us at <a href="mailto:privacy@jobseek.ai" style={{ color: '#84CC16' }}>privacy@jobseek.ai</a>.</p>
+            <p>To exercise any of these rights, contact us at <a href="mailto:sid1998mundra.sm@gmail.com" style={{ color: '#84CC16' }}>sid1998mundra.sm@gmail.com</a>.</p>
           </Section>
 
           <Section title="Chrome extension — permission justifications">
@@ -121,7 +121,7 @@ export default function PrivacyPage() {
           <Section title="Contact">
             <p>
               Jobseek.ai<br />
-              Email: <a href="mailto:privacy@jobseek.ai" style={{ color: '#84CC16' }}>privacy@jobseek.ai</a>
+              Email: <a href="mailto:sid1998mundra.sm@gmail.com" style={{ color: '#84CC16' }}>sid1998mundra.sm@gmail.com</a>
             </p>
           </Section>
         </div>
