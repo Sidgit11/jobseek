@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { Search, Sparkles, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { CompanyCard } from '@/components/discovery/CompanyCard'
@@ -16,7 +17,8 @@ const SUGGESTED_QUERIES = [
   'Consumer apps with strong growth signals',
 ]
 
-export default function DiscoverPage() {
+function DiscoverPageInner() {
+  const searchParams = useSearchParams()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [searching, setSearching] = useState(false)
@@ -25,6 +27,21 @@ export default function DiscoverPage() {
   const [savedCompanies, setSavedCompanies] = useState<Set<string>>(new Set())
   const [demoMode, setDemoMode] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const hasAutoSearched = useRef(false)
+
+  // Handle URL params: ?company=Microsoft or ?query=AI startups
+  useEffect(() => {
+    if (hasAutoSearched.current) return
+    const companyParam = searchParams.get('company')
+    const queryParam = searchParams.get('query')
+    const autoSearch = companyParam || queryParam
+    if (autoSearch) {
+      hasAutoSearched.current = true
+      setQuery(autoSearch)
+      // Auto-search when coming from "Find People" link
+      setTimeout(() => handleSearch(autoSearch), 100)
+    }
+  }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleSearch(q: string = query) {
     if (!q.trim()) return
@@ -69,7 +86,8 @@ export default function DiscoverPage() {
 
   function handleSuggestedQuery(q: string) {
     setQuery(q)
-    handleSearch(q)
+    // Just prefill — let the user edit and submit manually
+    inputRef.current?.focus()
   }
 
   return (
@@ -216,5 +234,13 @@ export default function DiscoverPage() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function DiscoverPage() {
+  return (
+    <Suspense fallback={<div className="flex h-screen items-center justify-center" style={{ background: 'var(--color-bg)' }}><Loader2 className="animate-spin" size={24} style={{ color: 'var(--color-lime)' }} /></div>}>
+      <DiscoverPageInner />
+    </Suspense>
   )
 }

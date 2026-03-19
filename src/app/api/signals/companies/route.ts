@@ -254,7 +254,7 @@ export async function POST(req: NextRequest) {
           })
 
         if (jobErr) {
-          console.error('[signals/companies] Job upsert error:', jobErr.message)
+          log.err('job-upsert', new Error(jobErr.message))
         } else {
           jobsUpserted++
         }
@@ -282,15 +282,15 @@ export async function POST(req: NextRequest) {
         .eq('id', companyRow.id)
     }
 
-    console.log(`[signals/companies] Materialized ${companiesUpserted} companies, ${jobsUpserted} jobs`)
+    log.res(200, { companies: companiesUpserted, jobs: jobsUpserted })
     return NextResponse.json(
       { materialized: companiesUpserted, jobs: jobsUpserted },
       { headers: CORS }
     )
 
   } catch (err: unknown) {
+    log.err('post', err)
     const message = err instanceof Error ? err.message : 'Unknown error'
-    console.error('[signals/companies] POST error:', message)
     return NextResponse.json({ error: message }, { status: 500, headers: CORS })
   }
 }
@@ -306,7 +306,7 @@ async function fallbackAggregation(supabase: ReturnType<typeof db>, token: strin
     .order('detected_at', { ascending: false })
 
   if (error) {
-    console.error('[signals/companies] Supabase error:', error.message)
+    log.err('supabase-query', new Error(error.message))
     return NextResponse.json({ error: error.message }, { status: 500, headers: CORS })
   }
 
