@@ -274,34 +274,83 @@ async function searchRevenueCompanies(rawQuery: string): Promise<CompanySearchRe
 export async function searchCompanies(keywords: string[]): Promise<CompanySearchResult[]> {
   const { isRevenue, isHiring, isDirect, hasGeo, hasFundingStage, rawQuery } = classifyQuery(keywords)
 
-  // ── Path 1: Direct company lookup (e.g. "Razorpay", "Stripe") ──────────────
+  // ── Path 1: Direct company lookup (e.g. "Razorpay", "Stripe", "Microsoft") ─
+  // For direct lookups, we do TWO things:
+  // 1. Construct a synthetic top result from the company name (guaranteed match)
+  // 2. Also search Exa for the company to get a proper description + related companies
   if (isDirect) {
+    const queryLower = rawQuery.toLowerCase().replace(/\s+/g, '')
+
+    // Common TLD guesses for the company domain
+    const domainGuesses = [
+      `${queryLower}.com`,
+      `${queryLower}.io`,
+      `${queryLower}.ai`,
+      `${queryLower}.co`,
+      `${queryLower}.app`,
+    ]
+
+    // Search Exa to find the actual company page + get a description
     const data = await exaRequest('/search', {
-      query: `"${rawQuery}"`,
+      query: `${rawQuery} official website company`,
       numResults: 10,
       type: 'neural',
-      category: 'company',
       useAutoprompt: false,
       contents: {
-        summary: { query: 'company description product team funding' },
+        summary: { query: 'company description product team funding headquarters' },
       },
     })
-    return data.results
-      .filter(r => r.url)
-      .map(r => {
-        let domain = 'unknown'
-        try { domain = getApexDomain(new URL(r.url).hostname) } catch { /* skip */ }
-        return {
-          name: cleanCompanyName(r.title, domain),
+
+    const results: CompanySearchResult[] = []
+    let foundExactMatch = false
+
+    for (const r of data.results) {
+      if (!r.url) continue
+      let domain = 'unknown'
+      try { domain = getApexDomain(new URL(r.url).hostname) } catch { continue }
+
+      const name = cleanCompanyName(r.title, domain)
+      const nameMatch = name.toLowerCase().includes(queryLower) || domain.includes(queryLower)
+
+      if (nameMatch && !foundExactMatch) {
+        // This IS the company — boost it to the top
+        foundExactMatch = true
+        results.unshift({
+          name: rawQuery, // Use the exact query as the name (e.g. "Microsoft")
           domain,
           url: r.url,
           snippet: r.summary ?? r.text?.slice(0, 200) ?? '',
           published_date: r.publishedDate ?? null,
-          score: r.score ?? 0.5,
-          source: 'direct_lookup' as const,
-        }
+          score: 1.0, // Maximum score for exact match
+          source: 'direct_lookup',
+        })
+      } else if (!isNewsDomain(domain)) {
+        results.push({
+          name,
+          domain,
+          url: r.url,
+          snippet: r.summary ?? r.text?.slice(0, 200) ?? '',
+          published_date: r.publishedDate ?? null,
+          score: r.score ?? 0.3,
+          source: 'company_page',
+        })
+      }
+    }
+
+    // If Exa didn't find the exact company, create a synthetic result
+    if (!foundExactMatch) {
+      results.unshift({
+        name: rawQuery,
+        domain: domainGuesses[0], // Best guess: company.com
+        url: `https://${domainGuesses[0]}`,
+        snippet: `${rawQuery} — search for more details about this company.`,
+        published_date: null,
+        score: 1.0,
+        source: 'direct_lookup',
       })
-      .slice(0, 10)
+    }
+
+    return deduplicateByDomain(results).slice(0, 10)
   }
 
   // ── Path 2: Revenue-threshold query — special handling ────────────────────
