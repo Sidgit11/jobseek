@@ -160,13 +160,38 @@ export default function OnboardingPage() {
       if (!chromeApi?.runtime?.sendMessage) return null
       const storedExtId = localStorage.getItem('jobseek_extension_id')
       if (!storedExtId) return null
+
+      // Try getting profile via extension callback
       const response = await new Promise<{ success?: boolean; profile?: ScrapedProfile }>((resolve) => {
         const timer = setTimeout(() => resolve({}), 35000)
         chromeApi.runtime!.sendMessage!(storedExtId, { action: 'SCRAPE_USER_PROFILE', linkedinUrl: url }, (resp: unknown) => {
           clearTimeout(timer); resolve((resp as { success?: boolean; profile?: ScrapedProfile }) || {})
         })
       })
-      return response?.success && response?.profile ? response.profile : null
+
+      if (response?.success && response?.profile?.name) return response.profile
+
+      // Fallback: extension stored profile to server — fetch it from there
+      // Wait a moment for the server write to complete
+      await new Promise(r => setTimeout(r, 3000))
+      try {
+        const res = await fetch('/api/user/profile')
+        const data = await res.json()
+        if (data.profile?.linkedin_experience?.length > 0 || data.profile?.linkedin_headline) {
+          return {
+            name: data.profile.name,
+            headline: data.profile.linkedin_headline,
+            company: data.profile.linkedin_experience?.[0]?.company || null,
+            role: data.profile.linkedin_experience?.[0]?.title || null,
+            location: data.profile.location,
+            about: undefined,
+            experience: data.profile.linkedin_experience?.map((e: { company: string; title: string; duration: string }) => ({ company: e.company, role: e.title, duration: e.duration })) || [],
+            education: [],
+          }
+        }
+      } catch {}
+
+      return null
     } catch { return null }
   }
 
@@ -206,12 +231,13 @@ export default function OnboardingPage() {
     if (!seniority) { setError('Select your seniority level'); return }
     setError(null)
     await fetch('/api/user/profile', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target_roles: targetRoles, seniority, target_locations: targetLocations, target_industries: targetIndustries, company_stages: companyStages }) })
-    setGeneratingSummary(true); setStep(3)
+    setStep(3); setGeneratingSummary(true)
     try {
       const res = await fetch('/api/user/generate-summary', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ linkedinProfile: scrapedProfile, resumeText, preferences: { target_roles: targetRoles, seniority, target_locations: targetLocations, target_industries: targetIndustries, company_stages: companyStages } }) })
       const data = await res.json()
       if (res.ok && data.summary) setSummary(data.summary)
-    } catch {}
+      else console.error('[Onboarding] Summary generation failed:', data.error || res.status)
+    } catch (err) { console.error('[Onboarding] Summary generation error:', err) }
     setGeneratingSummary(false)
   }
 

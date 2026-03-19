@@ -3,7 +3,7 @@ import { generateText } from '@/lib/google/client'
 
 const SYSTEM_PROMPT = `You are an expert career coach writing a professional summary for outbound job outreach.
 
-Write a 120-150 word professional summary that would make a hiring manager or recruiter want to respond to a cold message. The summary should:
+Write a 80-120 word professional summary (500-800 characters) that would make a hiring manager or recruiter want to respond to a cold message. The summary MUST be at least 80 words and at most 120 words. The summary should:
 
 1. Open with a strong identity statement (who they are + their superpower)
 2. Highlight 2-3 specific accomplishments or notable companies
@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
     const userPrompt = `Write a professional outreach summary for this person:\n\n${parts.join('\n')}`
 
     console.log('[generate-summary] Calling Gemini...')
-    const summary = await generateText(SYSTEM_PROMPT, userPrompt, { temperature: 0.6, maxTokens: 400 })
+    const summary = await generateText(SYSTEM_PROMPT, userPrompt, { temperature: 0.6, maxTokens: 800 })
 
     console.log(`[generate-summary] Generated ${summary.length} chars`)
 
