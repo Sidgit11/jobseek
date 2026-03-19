@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { routeLogger } from '@/lib/logger'
+
+const log = routeLogger('signals/metrics')
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -37,13 +40,14 @@ export async function POST(req: NextRequest) {
     })
 
     if (error) {
-      console.error('[metrics] DB insert error:', error.message)
+      log.err('db-insert', new Error(error.message))
       return NextResponse.json({ error: error.message }, { status: 500, headers: CORS_HEADERS })
     }
 
+    log.res(200, { source: body.source || 'FEED', postsExtracted: body.posts_extracted })
     return NextResponse.json({ ok: true }, { headers: CORS_HEADERS })
   } catch (err) {
-    console.error('[metrics] Error:', (err as Error).message)
+    log.err('post', err)
     return NextResponse.json({ error: 'Failed to store metrics' }, { status: 500, headers: CORS_HEADERS })
   }
 }

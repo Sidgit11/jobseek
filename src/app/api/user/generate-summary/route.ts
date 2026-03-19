@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { generateText } from '@/lib/google/client'
+import { routeLogger } from '@/lib/logger'
+
+const log = routeLogger('user/generate-summary')
 
 const SYSTEM_PROMPT = `You are an expert career coach writing a professional summary for outbound job outreach.
 
@@ -73,14 +76,17 @@ export async function POST(request: NextRequest) {
 
     const userPrompt = `Write a professional outreach summary for this person:\n\n${parts.join('\n')}`
 
-    console.log('[generate-summary] Calling Gemini...')
-    const summary = await generateText(SYSTEM_PROMPT, userPrompt, { temperature: 0.6, maxTokens: 800 })
+    log.req({ hasLinkedin: !!linkedinProfile, hasResume: !!resumeText, hasPreferences: !!preferences, inputChars: userPrompt.length })
+    const start = Date.now()
+    const summary = await generateText(SYSTEM_PROMPT, userPrompt, { temperature: 0.6, maxTokens: 2000 })
+    const wordCount = summary.split(/\s+/).length
+    log.step('gemini-call', { timing: Date.now() - start, chars: summary.length, words: wordCount })
+    if (wordCount < 50) log.warn('short-summary', { words: wordCount, summary: summary.slice(0, 100) })
 
-    console.log(`[generate-summary] Generated ${summary.length} chars`)
-
+    log.res(200, { chars: summary.length, words: wordCount })
     return NextResponse.json({ summary })
   } catch (err) {
-    console.error('[generate-summary] Error:', (err as Error).message)
+    log.err('generate', err)
     return NextResponse.json({ error: 'Failed to generate summary' }, { status: 500 })
   }
 }

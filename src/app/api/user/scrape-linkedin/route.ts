@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { routeLogger } from '@/lib/logger'
+
+const log = routeLogger('user/scrape-linkedin')
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -97,9 +100,9 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      console.log(`[scrape-linkedin] Extension data: name="${scrapedProfile.name}", headline="${scrapedProfile.headline}", company="${scrapedProfile.company}", role="${scrapedProfile.role}"`)
+      log.step('extension-data', { name: scrapedProfile.name, headline: scrapedProfile.headline, company: scrapedProfile.company, role: scrapedProfile.role })
     } else {
-      console.log(`[scrape-linkedin] URL stored (no scraped data): ${linkedinUrl}`)
+      log.step('url-only', { linkedinUrl })
     }
 
     const { error } = await supabase
@@ -108,16 +111,17 @@ export async function POST(request: NextRequest) {
       .eq('id', userId)
 
     if (error) {
-      console.error('[scrape-linkedin] DB update error:', error.message)
+      log.err('db-update', new Error(error.message))
       return NextResponse.json({ error: error.message }, { status: 500, headers: CORS_HEADERS })
     }
 
+    log.res(200, { scraped: !!scrapedProfile, stored: true })
     return NextResponse.json({
       scraped: !!scrapedProfile,
       stored: true,
     }, { headers: CORS_HEADERS })
   } catch (err) {
-    console.error('[scrape-linkedin] Error:', (err as Error).message)
+    log.err('scrape', err)
     return NextResponse.json({ error: 'Failed to process profile' }, { status: 500, headers: CORS_HEADERS })
   }
 }

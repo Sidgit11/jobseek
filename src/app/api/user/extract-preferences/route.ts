@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { generateText } from '@/lib/google/client'
+import { routeLogger } from '@/lib/logger'
+
+const log = routeLogger('user/extract-preferences')
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -91,13 +94,15 @@ export async function POST(request: NextRequest) {
 
     const userPrompt = `Analyze this profile and extract job search preferences:\n\n${parts.join('\n')}`
 
-    console.log('[extract-preferences] Calling Gemini...')
+    log.req({ hasLinkedin: !!linkedinProfile, hasResume: !!resumeText })
+    const start = Date.now()
     const text = await generateText(SYSTEM_PROMPT, userPrompt, { temperature: 0.3, maxTokens: 500 })
+    log.step('gemini-call', { timing: Date.now() - start })
 
     // Parse JSON from response
     const jsonMatch = text.match(/\{[\s\S]*\}/)
     if (!jsonMatch) {
-      console.error('[extract-preferences] Gemini returned non-JSON:', text.slice(0, 200))
+      log.err('gemini-parse', new Error('Gemini returned non-JSON: ' + text.slice(0, 200)))
       return NextResponse.json({ error: 'Failed to parse preferences' }, { status: 500, headers: CORS_HEADERS })
     }
 
@@ -119,11 +124,11 @@ export async function POST(request: NextRequest) {
     if (result.target_locations.length === 0) result.target_locations = ['Remote']
     if (result.target_industries.length === 0) result.target_industries = ['SaaS']
 
-    console.log('[extract-preferences] Extracted:', JSON.stringify(result))
+    log.res(200, { name: result.name, roles: result.target_roles, seniority: result.seniority })
 
     return NextResponse.json({ preferences: result }, { headers: CORS_HEADERS })
   } catch (err) {
-    console.error('[extract-preferences] Error:', (err as Error).message)
+    log.err('extract', err)
     return NextResponse.json({ error: 'Failed to extract preferences' }, { status: 500, headers: CORS_HEADERS })
   }
 }

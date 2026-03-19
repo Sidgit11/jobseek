@@ -171,25 +171,30 @@ export default function OnboardingPage() {
 
       if (response?.success && response?.profile?.name) return response.profile
 
-      // Fallback: extension stored profile to server — fetch it from there
-      // Wait a moment for the server write to complete
-      await new Promise(r => setTimeout(r, 3000))
-      try {
-        const res = await fetch('/api/user/profile')
-        const data = await res.json()
-        if (data.profile?.linkedin_experience?.length > 0 || data.profile?.linkedin_headline) {
-          return {
-            name: data.profile.name,
-            headline: data.profile.linkedin_headline,
-            company: data.profile.linkedin_experience?.[0]?.company || null,
-            role: data.profile.linkedin_experience?.[0]?.title || null,
-            location: data.profile.location,
-            about: undefined,
-            experience: data.profile.linkedin_experience?.map((e: { company: string; title: string; duration: string }) => ({ company: e.company, role: e.title, duration: e.duration })) || [],
-            education: [],
+      // Fallback: extension stored profile to server — poll until it arrives (up to 30s)
+      console.log('[Onboarding] Extension callback returned no profile, polling server...')
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await new Promise(r => setTimeout(r, 3000))
+        try {
+          const res = await fetch('/api/user/profile')
+          const data = await res.json()
+          console.log(`[Onboarding] Poll attempt ${attempt + 1}: linkedin_experience=${data.profile?.linkedin_experience?.length || 0}, headline=${!!data.profile?.linkedin_headline}`)
+          if (data.profile?.linkedin_experience?.length > 0 || data.profile?.linkedin_headline) {
+            console.log('[Onboarding] Got profile from server fallback')
+            return {
+              name: data.profile.name,
+              headline: data.profile.linkedin_headline,
+              company: data.profile.linkedin_experience?.[0]?.company || null,
+              role: data.profile.linkedin_experience?.[0]?.title || null,
+              location: data.profile.location,
+              about: undefined,
+              experience: data.profile.linkedin_experience?.map((e: { company: string; title: string; duration: string }) => ({ company: e.company, role: e.title, duration: e.duration })) || [],
+              education: [],
+            }
           }
-        }
-      } catch {}
+        } catch {}
+      }
+      console.warn('[Onboarding] Profile polling timed out after 30s')
 
       return null
     } catch { return null }
@@ -214,13 +219,18 @@ export default function OnboardingPage() {
       setResumeText(parsedResumeText)
     }
     setAnalyzeStatus('Analyzing your experience...')
+    console.log('[Onboarding] Calling extract-preferences with:', { hasProfile: !!profile, profileName: profile?.name, hasResume: !!parsedResumeText })
     try {
       const res = await fetch('/api/user/extract-preferences', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ linkedinProfile: profile, resumeText: parsedResumeText }) })
       const data = await res.json()
+      console.log('[Onboarding] extract-preferences response:', { ok: res.ok, status: res.status, hasPreferences: !!data.preferences, error: data.error })
       if (res.ok && data.preferences) {
         const p = data.preferences
+        console.log('[Onboarding] Pre-filling:', { roles: p.target_roles, seniority: p.seniority, locations: p.target_locations, industries: p.target_industries })
         setTargetRoles(p.target_roles || []); setSeniority(p.seniority || 'mid'); setTargetLocations(p.target_locations || []); setTargetIndustries(p.target_industries || []); setCompanyStages(p.company_stages || [])
         if (p.name) await fetch('/api/user/profile', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: p.name }) })
+      } else {
+        console.warn('[Onboarding] Preference extraction returned error:', data.error)
       }
     } catch (err) { console.error('[Onboarding] Preference extraction failed:', err) }
     setAnalyzing(false); setAnalyzeStatus(''); setStep(2)

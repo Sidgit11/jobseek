@@ -1,5 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
+import { routeLogger } from '@/lib/logger'
+import {
+  normalizeCompanyName,
+  looksLikePersonName,
+  looksLikeJobTitle,
+  extractCompanyFromTitle,
+  extractCompanyFromReasoning,
+  extractCompanyFromPreview,
+  extractRoleFromTitle,
+  extractRoleFromReasoning,
+  parseSeniority,
+  parseDepartment,
+} from '@/lib/signals/extraction'
+
+const log = routeLogger('signals/companies')
 
 function db() {
   return createSupabaseClient(
@@ -16,159 +31,6 @@ const CORS = {
 
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS })
-}
-
-// ── Company name normalization ──────────────────────────────────────────────
-
-function normalizeCompanyName(raw: string): string {
-  return raw
-    .trim()
-    .replace(/[.,]$/, '')
-    .replace(/\s+(Inc|LLC|Ltd|Corp|Co|GmbH|SA|AG|PLC)\.?$/i, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function extractCompanyFromTitle(title: string | null): string | null {
-  if (!title) return null
-  const separators = [' · ', ' | ', ' - ', ' @ ']
-  for (const sep of separators) {
-    const idx = title.lastIndexOf(sep)
-    if (idx !== -1) {
-      const candidate = title.slice(idx + sep.length).trim()
-      if (candidate.length > 1 && candidate.length < 80) {
-        // Reject if the "company" part looks like a job title fragment
-        // e.g. "Product Manager II - AI PM" → "AI PM" is NOT a company
-        if (/\b(manager|engineer|developer|designer|analyst|director|lead|senior|junior|intern|specialist|coordinator|consultant|architect|scientist|pm|swe|sde|vp|cto|ceo|cfo)\b/i.test(candidate) && candidate.length < 20) continue
-        if (looksLikePersonName(candidate)) continue
-        return normalizeCompanyName(candidate)
-      }
-    }
-  }
-  const atMatch = title.match(/\bat\s+(.{2,60})$/i)
-  if (atMatch) {
-    const candidate = atMatch[1].trim()
-    if (!looksLikePersonName(candidate)) return normalizeCompanyName(candidate)
-  }
-  return null
-}
-
-// Extract company name from Gemini's reasoning text
-// e.g. "Author explicitly stated hiring doctors for MeraDoc" → "MeraDoc"
-// e.g. "announced starting a new role at Stripe as Head of Product" → "Stripe"
-function extractCompanyFromReasoning(reasoning: string | null): string | null {
-  if (!reasoning) return null
-  // Common patterns in Gemini's reasoning output
-  const patterns = [
-    // "hiring for MeraDoc", "at Stripe as Head", "joining Revolut which"
-    /(?:hiring (?:for|at)|for|at|joining|joined|starting at|new role at|position at|working at|posted (?:by|about)|announced by)\s+([A-Z][A-Za-z0-9\s.&-]{1,40}?)(?:\s+as\s|\s*[,.]|\s+which|\s+indicating|\s+with|\s+is|\s+that|\s+in\s|\s+for\s)/,
-    // "at Stripe" at end of string
-    /(?:for|at|hiring at|hiring for)\s+([A-Z][A-Za-z0-9\s.&-]{1,40})$/,
-    // Quoted company names: "Revolut", 'Stripe'
-    /['"]([A-Z][A-Za-z0-9\s.&-]{1,30})['"]/,
-    // "Company X is hiring", "Company X posted"
-    /^([A-Z][A-Za-z0-9\s.&-]{1,30})\s+(?:is hiring|is actively hiring|posted|announced)/,
-  ]
-  for (const pattern of patterns) {
-    const match = reasoning.match(pattern)
-    if (match) {
-      const candidate = match[1].trim()
-      if (candidate.length > 1 && candidate.length < 60 && !looksLikePersonName(candidate)) {
-        return normalizeCompanyName(candidate)
-      }
-    }
-  }
-  return null
-}
-
-// Extract company from preview body for job-source signals
-// e.g. "Job: Senior Frontend Engineer at Stripe. San Francisco, CA..."
-function extractCompanyFromPreview(preview: string | null): string | null {
-  if (!preview) return null
-  const jobMatch = preview.match(/^Job:\s+(.+?)\s+at\s+([^.]+)\./i)
-  if (jobMatch) {
-    const jobTitle = jobMatch[1].trim()
-    const candidate = jobMatch[2].trim()
-    // Reject if "company" looks like the job title repeated (extraction bug) or is too long
-    if (candidate.length > 60) return null
-    if (candidate.toLowerCase() === jobTitle.toLowerCase()) return null
-    // Reject if candidate contains typical job title words — it's the title, not a company
-    if (/\b(manager|engineer|developer|designer|analyst|director|lead|senior|junior|intern|specialist|coordinator|consultant|architect|scientist)\b/i.test(candidate)) return null
-    if (!looksLikePersonName(candidate)) return normalizeCompanyName(candidate)
-  }
-  return null
-}
-
-function extractRoleFromTitle(title: string | null): string | null {
-  if (!title) return null
-  const separators = [' · ', ' | ', ' - ', ' @ ']
-  let role = title
-  for (const sep of separators) {
-    const idx = title.indexOf(sep)
-    if (idx !== -1) {
-      role = title.slice(0, idx).trim()
-      break
-    }
-  }
-  const atMatch = role.match(/^(.+?)\s+at\s+/i)
-  if (atMatch) role = atMatch[1].trim()
-  if (role && role.length > 1 && role.length < 100) return role
-  return null
-}
-
-// Extract the role being HIRED FOR from reasoning/preview text (for feed HIRING_POST signals
-// where title is the poster's headline, not the job role)
-function extractRoleFromReasoning(reasoning: string | null, preview: string | null): string | null {
-  // Try reasoning first — Gemini often mentions the specific role
-  if (reasoning) {
-    const patterns = [
-      /hiring (?:a |an |for (?:a |an )?)?([A-Z][A-Za-z /&-]{3,60}?)(?:\s+role|\s+position|\s*[,.]|\s+at\s|\s+in\s)/i,
-      /looking for (?:a |an )?([A-Z][A-Za-z /&-]{3,60}?)(?:\s*[,.]|\s+at\s|\s+in\s)/i,
-      /role(?:s)? (?:like |such as |including )?([A-Z][A-Za-z /&-]{3,60}?)(?:\s*[,.]|\s+at\s)/i,
-      /(?:opening|position|vacancy) (?:for (?:a |an )?)?([A-Z][A-Za-z /&-]{3,60}?)(?:\s*[,.]|\s+at\s)/i,
-    ]
-    for (const p of patterns) {
-      const m = reasoning.match(p)
-      if (m && m[1].trim().length > 3) return m[1].trim()
-    }
-  }
-  // Try preview — for job-source signals, title IS the role in the preview format "Job: ROLE at COMPANY"
-  if (preview) {
-    const jobMatch = preview.match(/^Job:\s+(.+?)(?:\s+at\s|\.)/i)
-    if (jobMatch && jobMatch[1].trim().length > 3) return jobMatch[1].trim()
-  }
-  return null
-}
-
-// Check if a string looks like a job title rather than a company name
-function looksLikeJobTitle(name: string): boolean {
-  if (!name) return false
-  return /\b(manager|engineer|developer|designer|analyst|director|lead|senior|junior|intern|specialist|coordinator|consultant|architect|scientist|product|head of|vp of)\b/i.test(name)
-}
-
-function parseSeniority(title: string): string | null {
-  const t = title.toLowerCase()
-  if (/\b(ceo|cto|cfo|coo|cpo|founder|co-founder|chief)\b/.test(t)) return 'c-level'
-  if (/\b(vp|vice president)\b/.test(t)) return 'vp'
-  if (/\bdirector\b/.test(t)) return 'director'
-  if (/\b(head of|head)\b/.test(t)) return 'head'
-  if (/\b(manager|lead|principal|staff)\b/.test(t)) return 'lead'
-  if (/\bsenior\b/.test(t)) return 'senior'
-  if (/\bjunior\b/.test(t)) return 'junior'
-  return 'mid'
-}
-
-function parseDepartment(title: string): string | null {
-  const t = title.toLowerCase()
-  if (/\b(engineer|developer|software|swe|backend|frontend|fullstack|devops|sre|infra|platform|data engineer)\b/.test(t)) return 'engineering'
-  if (/\b(product manager|product lead|product director|pm\b)/.test(t)) return 'product'
-  if (/\b(design|ux|ui|creative)\b/.test(t)) return 'design'
-  if (/\b(marketing|growth|brand|content|seo|sem)\b/.test(t)) return 'marketing'
-  if (/\b(sales|account exec|business development|bd|revenue)\b/.test(t)) return 'sales'
-  if (/\b(operations|ops|supply chain|logistics)\b/.test(t)) return 'operations'
-  if (/\b(data scientist|ml|machine learning|ai|research)\b/.test(t)) return 'data-science'
-  if (/\b(hr|people|talent|recruiting)\b/.test(t)) return 'people'
-  return null
 }
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -196,31 +58,6 @@ const JOB_SOURCES = new Set(['JOBS', 'FEED_JOBS_WIDGET', 'NOTIFICATION_JOB_ALERT
 function isJobSignal(row: SignalRow): boolean {
   if (row.type === 'HIRING_POST') return true
   if (row.source && JOB_SOURCES.has(row.source)) return true
-  return false
-}
-
-// Detect if a string looks like a person name rather than a company name.
-// Person names: "Shweta V.", "Prashant Tiwari", "John Smith III"
-// Company names: "Revolut", "Orange Health Labs", "Meta Platforms"
-function looksLikePersonName(name: string): boolean {
-  if (!name) return false
-  const trimmed = name.trim()
-  // Company indicators — if present, it's likely a company
-  if (/\b(Inc|LLC|Ltd|Corp|Labs|Technologies|Solutions|Ventures|Capital|Health|AI|Tech|Group|Global|Digital|Systems|Studios|Media|Platform|Platforms|Software|Services|Network|Networks|Finance|Financial|Consulting|Analytics|Robotics|Therapeutics|Pharma|Bio|Energy|Motors|Foods|Brands)\b/i.test(trimmed)) return false
-  // Single word with no spaces — could be company (Revolut, Meta, Stripe) — NOT a person
-  if (!trimmed.includes(' ')) return false
-  // Two words where both start with uppercase — classic person name pattern
-  // e.g. "Prashant Tiwari", "Shweta V.", "John Smith"
-  const words = trimmed.split(/\s+/)
-  if (words.length === 2) {
-    const [first, second] = words
-    // "Shweta V." pattern
-    if (/^[A-Z][a-z]+$/.test(first) && /^[A-Z]\.?$/.test(second)) return true
-    // "Prashant Tiwari" pattern — two capitalized words, no company indicators
-    if (/^[A-Z][a-z]+$/.test(first) && /^[A-Z][a-z]+$/.test(second)) return true
-  }
-  // Three words like "John Smith Jr" or "Mary Jane Watson"
-  if (words.length === 3 && words.every(w => /^[A-Z][a-z]*\.?$/.test(w))) return true
   return false
 }
 
@@ -292,12 +129,12 @@ export async function GET(req: NextRequest) {
     }
 
     // Fallback: aggregate from linkedin_signals in-memory (pre-migration)
-    console.log('[signals/companies] Falling back to in-memory aggregation')
+    log.step('fallback', { reason: 'no materialized data' })
     return fallbackAggregation(supabase, token)
 
   } catch (err: unknown) {
+    log.err('get', err)
     const message = err instanceof Error ? err.message : 'Unknown error'
-    console.error('[signals/companies] Error:', message)
     return NextResponse.json({ error: message }, { status: 500, headers: CORS })
   }
 }
@@ -348,7 +185,7 @@ export async function POST(req: NextRequest) {
 
       const rawCompany = candidates.find(c => c != null && c.trim().length > 1) ?? null
       if (!rawCompany) {
-        console.log(`[signals/companies] Skipping signal ${signal.id} — no valid company name found (author="${signal.author}", title="${signal.title}")`)
+        log.step('skip-no-company', { signalId: signal.id, author: signal.author, title: signal.title })
         continue
       }
 
@@ -356,7 +193,7 @@ export async function POST(req: NextRequest) {
       const nameLower = companyName.toLowerCase()
       const REJECT_NAMES = new Set(['unknown company', 'unknown', 'linkedin', 'linkedin user', 'notification'])
       if (!nameLower || REJECT_NAMES.has(nameLower) || looksLikeJobTitle(companyName)) {
-        console.log(`[signals/companies] Skipping "${companyName}" — invalid company name (rejected/job title)`)
+        log.step('skip-invalid-name', { companyName })
         continue
       }
 

@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { generateText } from '@/lib/google/client'
+import { routeLogger } from '@/lib/logger'
+
+const log = routeLogger('signals/classify')
 
 // CORS headers — allow Chrome extension origins (chrome-extension://*) + localhost
 const CORS_HEADERS = {
@@ -197,32 +200,33 @@ export async function POST(req: NextRequest) {
 
     const userPrompt = `Posts to classify:\n${JSON.stringify(postsPayload, null, 2)}\n\nReturn a JSON array with exactly ${batch.length} entries (nulls for non-signals):`
 
-    console.log(`[classify] Sending ${batch.length} posts to Gemini:`)
+    log.req({ postCount: batch.length, sources: [...new Set(batch.map(p => p.source))] })
     postsPayload.forEach(p => {
-      console.log(`  [in] #${p.index} ${p.author} (${p.degree}${p.reactor ? ` via ${p.reactor}` : ''}) — "${p.body.slice(0, 80)}..."`)
+      log.step('input-post', { index: p.index, author: p.author, degree: p.degree, reactor: p.reactor })
     })
     const systemPrompt = buildSystemPrompt(userProfile)
+    const start = Date.now()
     const text = await generateText(systemPrompt, userPrompt, { temperature: 0.2, maxTokens: 4096 })
+    log.step('gemini-call', { timing: Date.now() - start })
 
     // Parse Gemini's JSON response — strip markdown fences if present
     // Gemini sometimes wraps output in ```json ... ``` blocks
     const stripped = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
     const jsonMatch = stripped.match(/\[[\s\S]*\]/)
     if (!jsonMatch) {
-      console.error('[classify] Gemini returned non-JSON:', text.slice(0, 200))
+      log.err('gemini-parse', new Error('Gemini returned non-JSON: ' + text.slice(0, 200)))
       return NextResponse.json({ signals: [] }, { headers: CORS_HEADERS })
     }
 
     const classifications: (GeminiClassification | null)[] = JSON.parse(jsonMatch[0])
 
     // Log every classification result so we can see exactly what Gemini decided
-    console.log(`[classify] Gemini results:`)
     classifications.forEach((cls, i) => {
       const post = batch[i]
       if (cls && cls.isSignal) {
-        console.log(`  [SIGNAL] #${i} ${post.author} → ${cls.type} (tier ${cls.tier}, ${cls.confidence}%) company="${cls.companyName || '?'}" — ${cls.reasoning}`)
+        log.step('signal', { index: i, author: post.author, type: cls.type, tier: cls.tier, confidence: cls.confidence, company: cls.companyName || '?' })
       } else {
-        console.log(`  [skip]   #${i} ${post.author} (${post.degree}, ${post.source || 'FEED'}) — not a signal — "${(post.body || '').slice(0, 80)}…"`)
+        log.step('skip', { index: i, author: post.author, degree: post.degree, source: post.source || 'FEED' })
       }
     })
 
@@ -254,16 +258,16 @@ export async function POST(req: NextRequest) {
       })
     })
 
-    console.log(`[classify] ${batch.length} posts → ${signals.length} signals`)
+    log.res(200, { posts: batch.length, signals: signals.length })
     return NextResponse.json({ signals }, { headers: CORS_HEADERS })
 
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
-    console.error('[classify] Error:', message)
+    log.err('classify', err)
 
     // Surface quota/billing errors with a 429 so the extension can handle them distinctly
     if (message.includes('429') || message.includes('spending cap') || message.includes('quota')) {
-      console.warn('[classify] Gemini quota hit — returning empty signals, posts will NOT be marked seen so they retry later')
+      log.warn('quota-hit', { hint: 'returning empty signals, posts will retry later' })
       return NextResponse.json(
         { signals: [], error: 'quota_exceeded', hint: 'Gemini spending cap reached. Check aistudio.google.com → your project → billing.' },
         { status: 429, headers: CORS_HEADERS }

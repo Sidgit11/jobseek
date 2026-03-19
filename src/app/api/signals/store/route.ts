@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
+import { routeLogger } from '@/lib/logger'
+
+const log = routeLogger('signals/store')
 
 function db() {
   return createSupabaseClient(
@@ -102,24 +105,25 @@ export async function POST(req: NextRequest) {
       .upsert(rows, { onConflict: 'id,device_token' })
 
     if (error) {
-      console.error('[signals/store] Supabase upsert error:', error.message)
+      log.err('supabase-upsert', new Error(error.message))
       return NextResponse.json(
         { error: error.message },
         { status: 500, headers: CORS }
       )
     }
 
-    console.log(`[signals/store] Stored ${rows.length} signals for token ${token.slice(0, 8)}…`)
+    log.step('stored', { count: rows.length, token: token.slice(0, 8) })
 
     // Fire-and-forget: materialize companies + jobs from stored signals
     materializeCompanies(token, rows).catch(err =>
-      console.warn('[signals/store] Company materialization skipped:', err.message)
+      log.warn('materialize-skipped', { error: err.message })
     )
 
+    log.res(200, { stored: rows.length })
     return NextResponse.json({ stored: rows.length }, { headers: CORS })
   } catch (err: unknown) {
+    log.err('store', err)
     const message = err instanceof Error ? err.message : 'Unknown error'
-    console.error('[signals/store] Error:', message)
     return NextResponse.json({ error: message }, { status: 500, headers: CORS })
   }
 }
