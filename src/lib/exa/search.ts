@@ -46,58 +46,72 @@ export interface CompanySearchResult {
   snippet: string
   published_date: string | null
   score: number
+  // Source metadata for debugging and ranking
+  source: 'company_page' | 'news_extracted' | 'direct_lookup'
+  funding_context?: string  // funding stage / ARR found in news pass
 }
 
 // Words that signal a result is a news headline, not a company homepage
 const NEWS_VERBS = /\b(raises|raised|launches|launched|acquires|acquired|announces|announced|hires|hired|closes|closed|secures|secured|wins|won|expands|expanded|partners|partnered|releases|released|funding|round|billion|million|series [a-e]|ipo|valued)\b/i
 
-/** Extract apex domain: app.stripe.com → stripe.com, www.openai.com → openai.com */
+// Detect revenue-threshold queries — Exa can't filter by ARR/revenue directly
+const REVENUE_PATTERN = /(\$?\d+[km]?\+?\s*(arr|mrr|revenue|annual recurring|million|m\b))|(\d+\s*million\s*(revenue|arr|mrr))/i
+
+// Detect geographic terms in query
+const GEO_TERMS = /\b(india|bangalore|bengaluru|mumbai|delhi|hyderabad|chennai|us|usa|nyc|new york|london|singapore|europe|latam|remote)\b/i
+
+// Funding stage terms
+const FUNDING_TERMS = /\b(seed|pre-seed|series [a-f]|series a|series b|series c|growth|late stage|pre-ipo|bootstrap)\b/i
+
+/** Extract apex domain: app.stripe.com → stripe.com */
 function getApexDomain(hostname: string): string {
   const h = hostname.replace(/^www\./, '')
   const parts = h.split('.')
-  // Handle two-part TLDs like co.uk, com.au, co.in
   const twoPartTLDs = new Set(['co.uk', 'co.in', 'com.au', 'co.nz', 'org.uk', 'net.au'])
   if (parts.length >= 3 && twoPartTLDs.has(parts.slice(-2).join('.'))) {
     return parts.slice(-3).join('.')
   }
-  // Standard: return last 2 parts (stripe.com, perplexity.ai, etc.)
   return parts.slice(-2).join('.')
 }
 
 function domainToName(domain: string): string {
-  const base = domain.replace(/\.(com|io|ai|co|net|org|app|dev|tech|co\.uk)$/, '')
+  const base = domain.replace(/\.(com|io|ai|co|net|org|app|dev|tech|co\.uk|in)$/, '')
   return base.split(/[-_]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
 }
 
 function cleanCompanyName(title: string, domain: string): string {
-  // Split on all common separators, with or without surrounding spaces
   const segments = title
     .split(/\s*[|·]\s*|\s+[-–—]\s+|\s*:\s+/)
     .map(s => s.trim())
     .filter(s => s.length > 0)
 
-  // Score each segment: lower word count + no news verbs = better brand name
   const scored = segments
     .filter(s => !NEWS_VERBS.test(s))
     .map(s => ({ s, words: s.split(/\s+/).length }))
-    .sort((a, b) => a.words - b.words) // shortest first = most likely brand name
+    .sort((a, b) => a.words - b.words)
 
-  // Pick shortest non-headline segment if it's ≤ 4 words
   if (scored.length > 0 && scored[0].words <= 4) {
     return scored[0].s
   }
 
-  // Entire title is a news headline — derive from domain
   return domainToName(domain)
 }
 
-/** Detect direct company lookups like "Microsoft", "Stripe", "Google" vs discovery queries */
+const NEWS_MEDIA_DOMAINS = new Set([
+  'techcrunch', 'forbes', 'bloomberg', 'wired', 'wsj', 'theverge',
+  'venturebeat', 'businessinsider', 'inc42', 'yourstory', 'vccircle',
+  'economic times', 'moneycontrol', 'cnbc', 'reuters', 'ft',
+])
+
+function isNewsDomain(domain: string): boolean {
+  return Array.from(NEWS_MEDIA_DOMAINS).some(d => domain.includes(d))
+}
+
+/** Direct company lookups like "Stripe", "Razorpay" vs discovery queries */
 function isDirectCompanyLookup(query: string): boolean {
   const words = query.trim().split(/\s+/)
   if (words.length === 0 || words.length > 3) return false
-  // Must start with a capital letter (proper noun / company name)
   if (!/^[A-Z]/.test(words[0])) return false
-  // If any word is a discovery/filter term, it's not a direct lookup
   const discoveryTerms = new Set([
     'hiring', 'startup', 'startups', 'series', 'seed', 'ai', 'ml',
     'nyc', 'remote', 'engineer', 'engineers', 'engineering',
@@ -111,57 +125,218 @@ function isDirectCompanyLookup(query: string): boolean {
   return true
 }
 
-export async function searchCompanies(keywords: string[]): Promise<CompanySearchResult[]> {
+/**
+ * Classify what kind of search the user wants so we can route to the right Exa strategy.
+ */
+function classifyQuery(keywords: string[]): {
+  isRevenue: boolean
+  isHiring: boolean
+  isDirect: boolean
+  hasGeo: boolean
+  hasFundingStage: boolean
+  rawQuery: string
+} {
   const rawQuery = keywords.join(' ')
-  const directLookup = isDirectCompanyLookup(rawQuery)
-  const query = directLookup ? `"${rawQuery}"` : `${rawQuery} company startup`
-  const numResults = directLookup ? 10 : 25
+  return {
+    isRevenue:       REVENUE_PATTERN.test(rawQuery),
+    isHiring:        /\b(hiring|jobs|roles|open positions|recruiting)\b/i.test(rawQuery),
+    isDirect:        isDirectCompanyLookup(rawQuery),
+    hasGeo:          GEO_TERMS.test(rawQuery),
+    hasFundingStage: FUNDING_TERMS.test(rawQuery),
+    rawQuery,
+  }
+}
 
+function deduplicateByDomain(results: CompanySearchResult[]): CompanySearchResult[] {
+  const seen = new Map<string, CompanySearchResult>()
+  for (const r of results) {
+    const existing = seen.get(r.domain)
+    // Prefer company_page source over news_extracted; then higher score
+    if (!existing) {
+      seen.set(r.domain, r)
+    } else if (r.source === 'company_page' && existing.source !== 'company_page') {
+      seen.set(r.domain, r)
+    } else if (r.source === existing.source && r.score > existing.score) {
+      seen.set(r.domain, r)
+    }
+  }
+  return Array.from(seen.values())
+}
+
+/**
+ * PRIMARY SEARCH: category:company — returns actual company homepages.
+ * Best for: discovery queries, geographic/stage/role filters.
+ * Note: date filters are NOT supported in category:company mode.
+ */
+async function searchCompanyPages(query: string, numResults = 20): Promise<CompanySearchResult[]> {
   const data = await exaRequest('/search', {
     query,
-    numResults, // fetch more to allow for dedup
+    numResults,
     type: 'neural',
+    category: 'company',
     useAutoprompt: true,
-    excludeDomains: [
-      'linkedin.com', 'twitter.com', 'facebook.com', 'instagram.com',
-      'techcrunch.com', 'crunchbase.com', 'forbes.com', 'bloomberg.com',
-      'wsj.com', 'nytimes.com', 'theverge.com', 'wired.com', 'venturebeat.com',
-    ],
     contents: {
-      summary: { query: 'company description funding team product' },
+      summary: { query: 'company description funding stage product hiring team size location' },
     },
   })
 
-  // Deduplicate by domain — keep highest-scored result per domain
-  const seen = new Map<string, CompanySearchResult>()
-
+  const results: CompanySearchResult[] = []
   for (const r of data.results) {
-    if (!r.url || r.url.includes('linkedin') || r.url.includes('twitter')) continue
-
+    if (!r.url) continue
     let url: URL
     try { url = new URL(r.url) } catch { continue }
-
     const domain = getApexDomain(url.hostname)
+    if (isNewsDomain(domain)) continue
 
-    // Skip news/media domains that slipped through
-    if (/^(techcrunch|forbes|bloomberg|wired|wsj|theverge|venturebeat|inc\.|businessinsider)/.test(domain)) continue
-
-    const entry: CompanySearchResult = {
+    results.push({
       name: cleanCompanyName(r.title, domain),
       domain,
       url: r.url,
       snippet: r.summary ?? r.highlights?.[0] ?? r.text?.slice(0, 200) ?? '',
       published_date: r.publishedDate ?? null,
       score: r.score ?? 0.5,
-    }
+      source: 'company_page',
+    })
+  }
+  return results
+}
 
-    const existing = seen.get(domain)
-    if (!existing || entry.score > existing.score) {
-      seen.set(domain, entry)
-    }
+/**
+ * NEWS CONTEXT PASS: neural search on tech/startup news domains.
+ * Used to find funding context (stage, investors, ARR) and extract company names.
+ * Returns company domains extracted from news coverage.
+ */
+async function searchNewsForCompanies(
+  query: string,
+  numResults = 15
+): Promise<CompanySearchResult[]> {
+  const newsDomains = [
+    'techcrunch.com', 'venturebeat.com', 'inc42.com', 'yourstory.com',
+    'vccircle.com', 'businesswire.com', 'prnewswire.com',
+    'bloomberg.com', 'forbes.com',
+  ]
+
+  const data = await exaRequest('/search', {
+    query,
+    numResults,
+    type: 'neural',
+    useAutoprompt: true,
+    includeDomains: newsDomains,
+    startPublishedDate: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    contents: {
+      summary: { query: 'company name funding stage ARR revenue investors hiring' },
+    },
+  })
+
+  // Extract company domains from news articles — look for company homepage links
+  // For now, extract company name from title and mark as news_extracted
+  const results: CompanySearchResult[] = []
+  for (const r of data.results) {
+    if (!r.url || !r.title) continue
+    // News articles aren't company pages — we capture context only
+    // The company name is the subject of the article (before " Raises", " Hits", " Launches" etc.)
+    const companyName = r.title.split(/\s+(raises|hits|reaches|surpasses|launches|acquires|closes|secures|announces)\s/i)[0]?.trim()
+    if (!companyName || companyName.length > 60) continue
+
+    // Guess domain from company name — will be enriched/corrected by Crunchbase later
+    const guessedDomain = companyName.toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '')
+      .replace(/\s+/g, '') + '.com'
+
+    results.push({
+      name: companyName,
+      domain: guessedDomain,
+      url: r.url,   // points to news article, not company
+      snippet: r.summary ?? r.text?.slice(0, 200) ?? '',
+      published_date: r.publishedDate ?? null,
+      score: r.score ?? 0.3,
+      source: 'news_extracted',
+      funding_context: r.summary?.slice(0, 150),
+    })
+  }
+  return results
+}
+
+/**
+ * REVENUE QUERY STRATEGY:
+ * Exa cannot filter by revenue threshold — treat these queries as
+ * "companies that announced $X ARR milestone" and search press releases.
+ */
+async function searchRevenueCompanies(rawQuery: string): Promise<CompanySearchResult[]> {
+  // Extract the revenue number to make the news query more specific
+  const match = rawQuery.match(/(\$?\d+[km]?)\s*(arr|mrr|revenue|million|m\b)/i)
+  const revenueStr = match ? match[0] : '10 million ARR'
+
+  const newsQuery = `startup company ${revenueStr} annual recurring revenue milestone 2024 2025`
+  return searchNewsForCompanies(newsQuery, 12)
+}
+
+export async function searchCompanies(keywords: string[]): Promise<CompanySearchResult[]> {
+  const { isRevenue, isHiring, isDirect, hasGeo, hasFundingStage, rawQuery } = classifyQuery(keywords)
+
+  // ── Path 1: Direct company lookup (e.g. "Razorpay", "Stripe") ──────────────
+  if (isDirect) {
+    const data = await exaRequest('/search', {
+      query: `"${rawQuery}"`,
+      numResults: 10,
+      type: 'neural',
+      category: 'company',
+      useAutoprompt: false,
+      contents: {
+        summary: { query: 'company description product team funding' },
+      },
+    })
+    return data.results
+      .filter(r => r.url)
+      .map(r => {
+        let domain = 'unknown'
+        try { domain = getApexDomain(new URL(r.url).hostname) } catch { /* skip */ }
+        return {
+          name: cleanCompanyName(r.title, domain),
+          domain,
+          url: r.url,
+          snippet: r.summary ?? r.text?.slice(0, 200) ?? '',
+          published_date: r.publishedDate ?? null,
+          score: r.score ?? 0.5,
+          source: 'direct_lookup' as const,
+        }
+      })
+      .slice(0, 10)
   }
 
-  return Array.from(seen.values())
+  // ── Path 2: Revenue-threshold query — special handling ────────────────────
+  if (isRevenue) {
+    const revenueResults = await searchRevenueCompanies(rawQuery)
+    return revenueResults.slice(0, 15)
+  }
+
+  // ── Path 3: Discovery query — parallel company + news pass ────────────────
+  // Build targeted query for company page search
+  const companyPageQuery = rawQuery  // category:company mode handles context well
+
+  // Build news query — add funding/hiring context for better article targeting
+  const newsQuery = [
+    rawQuery,
+    hasFundingStage ? '' : '',  // funding stage is already in rawQuery if user typed it
+    'funding announcement 2024 2025',
+  ].filter(Boolean).join(' ')
+
+  // Run both passes in parallel
+  const [companyResults, newsResults] = await Promise.all([
+    searchCompanyPages(companyPageQuery, 20),
+    hasFundingStage || hasGeo ? searchNewsForCompanies(newsQuery, 12) : Promise.resolve([]),
+  ])
+
+  // Merge: company pages take precedence, news results fill gaps
+  const merged = deduplicateByDomain([...companyResults, ...newsResults])
+
+  // Re-score: company_page results get a boost, news_extracted results are ranked lower
+  const rescored = merged.map(r => ({
+    ...r,
+    score: r.source === 'company_page' ? r.score + 0.3 : r.score,
+  }))
+
+  return rescored
     .sort((a, b) => b.score - a.score)
     .slice(0, 15)
 }
