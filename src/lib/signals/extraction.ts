@@ -5,7 +5,8 @@ export function normalizeCompanyName(raw: string): string {
   return raw
     .trim()
     .replace(/[.,]$/, '')
-    .replace(/\s+(Inc|LLC|Ltd|Corp|Co|GmbH|SA|AG|PLC)\.?$/i, '')
+    .replace(/[,\s]+(Inc|LLC|Ltd|Corp|Co|GmbH|SA|AG|PLC)\.?$/i, '')
+    .replace(/[.,\s]+$/, '')
     .replace(/\s+/g, ' ')
     .trim()
 }

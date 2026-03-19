@@ -215,7 +215,7 @@ export async function POST(req: NextRequest) {
         .single()
 
       if (compErr) {
-        console.error('[signals/companies] Company upsert error:', compErr.message)
+        log.err('company-upsert', new Error(compErr.message))
         continue
       }
 
