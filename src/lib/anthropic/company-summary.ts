@@ -89,6 +89,6 @@ Target roles: ${targetRoles.join(', ')}
 Target industries: ${targetIndustries.join(', ')}
 
 Output ONLY the summary text. No intro, no explanation, no quotes.`,
-    { temperature: 0.6, maxTokens: 400 }
+    { temperature: 0.6, maxTokens: 1000 }
   )
 }

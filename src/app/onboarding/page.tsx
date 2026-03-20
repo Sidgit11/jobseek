@@ -219,6 +219,31 @@ export default function OnboardingPage() {
       setResumeText(parsedResumeText)
     }
     setAnalyzeStatus('Analyzing your experience...')
+
+    // If LinkedIn scrape returned nothing, try to build a profile from server data
+    if (!profile && linkedinUrl) {
+      console.log('[Onboarding] Scrape returned null, fetching server profile as fallback...')
+      try {
+        const srvRes = await fetch('/api/user/profile')
+        const srvData = await srvRes.json()
+        const sp = srvData.profile
+        if (sp?.linkedin_headline || sp?.linkedin_experience?.length > 0) {
+          profile = {
+            name: sp.name,
+            headline: sp.linkedin_headline,
+            company: sp.linkedin_experience?.[0]?.company || null,
+            role: sp.linkedin_experience?.[0]?.title || null,
+            location: sp.location,
+            about: undefined,
+            experience: sp.linkedin_experience?.map((e: { company: string; title: string; duration: string }) => ({ company: e.company, role: e.title, duration: e.duration })) || [],
+            education: [],
+          }
+          setScrapedProfile(profile)
+          console.log('[Onboarding] Got profile from server fallback:', { name: profile.name, headline: profile.headline })
+        }
+      } catch {}
+    }
+
     console.log('[Onboarding] Calling extract-preferences with:', { hasProfile: !!profile, profileName: profile?.name, hasResume: !!parsedResumeText })
     try {
       const res = await fetch('/api/user/extract-preferences', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ linkedinProfile: profile, resumeText: parsedResumeText }) })
