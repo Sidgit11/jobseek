@@ -110,15 +110,16 @@ const DISCOVERY_TERMS = new Set([
 function extractCompanyNameFromQuery(rawQuery: string): string | null {
   const words = rawQuery.trim().split(/\s+/)
   if (words.length === 0 || words.length > 4) return null
-  if (!/^[A-Z]/.test(words[0])) return null
 
   // Check if any word is a discovery term → not a company lookup
   for (const w of words) {
     if (DISCOVERY_TERMS.has(w.toLowerCase())) return null
   }
 
-  // Single word: it's a company name
-  if (words.length === 1) return words[0]
+  // Single word: it's a company name (capitalize first letter)
+  if (words.length === 1) {
+    return words[0].charAt(0).toUpperCase() + words[0].slice(1)
+  }
 
   // Multi-word: check if trailing words are role terms
   // "Microsoft PM" → company="Microsoft", role="PM"
@@ -136,7 +137,8 @@ function extractCompanyNameFromQuery(rawQuery: string): string | null {
   // If we stripped all words, something's wrong
   if (companyWords.length === 0) return null
 
-  return companyWords.join(' ')
+  // Capitalize first letter of each word for clean company name
+  return companyWords.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
 }
 
 /** Expand geography string to list of cities/regions */
@@ -399,7 +401,7 @@ Query: "YC companies building developer tools"
   "temporal": "recently_funded",
   "implicitSignals": ["recently_funded", "small_team", "engineering_heavy"]
 }`,
-      { temperature: 0.3, maxTokens: 800 }
+      { temperature: 0.3, maxTokens: 1200 }
     )
     const cleaned = text.replace(/```json\n?|\n?```/g, '').trim()
     const parsed = JSON.parse(cleaned)

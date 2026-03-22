@@ -195,4 +195,22 @@ describe('intent extraction heuristic behavior', () => {
     const intent = await extractSearchIntent('Series B AI startups', baseContext)
     expect(intent.companyName).toBeNull()
   })
+
+  // ── Lowercase company name tests ──────────────────────────────────────────
+
+  test('"microsoft PMs" (lowercase) extracts companyName as "Microsoft"', async () => {
+    const intent = await extractSearchIntent('microsoft PMs', baseContext)
+    expect(intent.companyName).toBe('Microsoft')
+    expect(intent.confidence).toBeGreaterThanOrEqual(0.9)
+  })
+
+  test('"stripe" (lowercase) is detected as company', async () => {
+    const intent = await extractSearchIntent('stripe', baseContext)
+    expect(intent.companyName).toBe('Stripe')
+  })
+
+  test('"razorpay engineering" (lowercase) extracts "Razorpay"', async () => {
+    const intent = await extractSearchIntent('razorpay engineering', baseContext)
+    expect(intent.companyName).toBe('Razorpay')
+  })
 })
