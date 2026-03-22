@@ -18,7 +18,10 @@ const STEPS = [
   'Generating targeting briefs',
 ]
 
-const STEP_INTERVAL = 1200 // ms between steps
+/** Random delay between 3-5 seconds per step */
+function randomStepDelay(): number {
+  return 3000 + Math.random() * 2000
+}
 
 export function SearchLoader({ active, onComplete }: SearchLoaderProps) {
   const [currentStep, setCurrentStep] = useState(0)
@@ -33,7 +36,7 @@ export function SearchLoader({ active, onComplete }: SearchLoaderProps) {
         setCompleted(true)
         setTimeout(() => onComplete?.(), 400)
       }
-      if (timerRef.current) clearInterval(timerRef.current)
+      if (timerRef.current) clearTimeout(timerRef.current)
       return
     }
 
@@ -41,20 +44,24 @@ export function SearchLoader({ active, onComplete }: SearchLoaderProps) {
     setCurrentStep(0)
     setCompleted(false)
 
-    // Advance step 0 immediately, then timer for the rest
+    // Advance step 0 immediately, then schedule next steps with random delays
     let step = 0
-    timerRef.current = setInterval(() => {
-      step++
-      if (step >= STEPS.length) {
-        // Don't auto-complete — wait for results
-        if (timerRef.current) clearInterval(timerRef.current)
-        return
-      }
-      setCurrentStep(step)
-    }, STEP_INTERVAL)
+    let cancelled = false
+
+    function scheduleNext() {
+      if (cancelled) return
+      timerRef.current = setTimeout(() => {
+        step++
+        if (step >= STEPS.length || cancelled) return
+        setCurrentStep(step)
+        scheduleNext()
+      }, randomStepDelay())
+    }
+    scheduleNext()
 
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current)
+      cancelled = true
+      if (timerRef.current) clearTimeout(timerRef.current)
     }
   }, [active]) // eslint-disable-line react-hooks/exhaustive-deps
 
