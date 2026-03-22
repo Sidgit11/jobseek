@@ -66,10 +66,10 @@ function DiscoverPageInner() {
     const sorted = [...results]
     switch (sortMode) {
       case 'fit':
-        sorted.sort((a, b) => b.relevance_score - a.relevance_score)
+        sorted.sort((a, b) => b.fit_score - a.fit_score)
         break
       case 'relevance':
-        sorted.sort((a, b) => b.exa_score - a.exa_score)
+        sorted.sort((a, b) => b.relevance_score - a.relevance_score)
         break
       case 'funding':
         sorted.sort((a, b) => parseFundingToNumber(b.company.total_funding) - parseFundingToNumber(a.company.total_funding))

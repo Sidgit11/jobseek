@@ -189,6 +189,7 @@ export const DEMO_RESULTS: SearchResult[] = [
   {
     company: perplexity,
     relevance_score: 91,
+    fit_score: 85,
     exa_score: 0.95,
     match_reasons: ['Series B stage', 'AI / ML industry', 'Hiring PMs', 'SF-based'],
     snippet: 'Perplexity AI is redefining search with an AI-native answer engine. 15M+ users and growing — now expanding into enterprise with Pro and API products.',
@@ -198,6 +199,7 @@ export const DEMO_RESULTS: SearchResult[] = [
   {
     company: elevenlabs,
     relevance_score: 84,
+    fit_score: 78,
     exa_score: 0.88,
     match_reasons: ['Series B stage', 'AI / ML industry', 'Growing team'],
     snippet: 'ElevenLabs is the gold standard in voice AI — ultra-realistic voice synthesis and cloning used by 1M+ creators and major media enterprises.',
@@ -207,6 +209,7 @@ export const DEMO_RESULTS: SearchResult[] = [
   {
     company: harvey,
     relevance_score: 79,
+    fit_score: 72,
     exa_score: 0.82,
     match_reasons: ['Series C stage', 'Enterprise AI', 'Rapid team expansion'],
     snippet: 'Harvey is the AI platform for professional services. Deployed at 4 of 5 Magic Circle law firms, now expanding into regulatory and tax workflows.',
@@ -216,6 +219,7 @@ export const DEMO_RESULTS: SearchResult[] = [
   {
     company: glean,
     relevance_score: 74,
+    fit_score: 65,
     exa_score: 0.76,
     match_reasons: ['AI / ML industry', 'Enterprise SaaS', '500+ enterprise customers'],
     snippet: 'Glean connects all your company apps and surfaces knowledge instantly with AI. Deployed at Databricks, Okta, Duolingo, and 500+ enterprises.',
@@ -225,6 +229,7 @@ export const DEMO_RESULTS: SearchResult[] = [
   {
     company: vapi,
     relevance_score: 68,
+    fit_score: 60,
     exa_score: 0.71,
     match_reasons: ['Series A', 'AI / ML', 'First PM hire opportunity'],
     snippet: 'Vapi is the developer platform for voice AI — enabling any company to add real-time, sub-200ms AI voice. 7,000+ developers and growing.',

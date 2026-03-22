@@ -153,7 +153,8 @@ export interface TargetingBrief {
 
 export interface SearchResult {
   company: Company
-  relevance_score: number
+  relevance_score: number    // Query relevance: how well does this company match the SEARCH QUERY
+  fit_score: number          // User fit: how well does this company match the USER PROFILE
   exa_score: number
   match_reasons: string[]
   // From Exa

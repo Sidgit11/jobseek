@@ -64,22 +64,24 @@ function InvestorPills({ investors }: { investors: string[] }) {
   )
 }
 
-function RelevanceBar({ score }: { score: number }) {
-  const label = score > 75 ? 'Strong fit' : score > 50 ? 'Good fit' : 'Possible fit'
+function ScoreBadge({ label, score, color }: { label: string; score: number; color: string }) {
   return (
-    <div className="mt-3 flex items-center gap-2">
-      <div className="h-1 flex-1 rounded-full overflow-hidden" style={{ background: '#E8E8E3' }}>
-        <div
-          className="h-full rounded-full transition-all"
-          style={{
-            width: `${score}%`,
-            background: score > 75 ? 'var(--color-success)' : score > 50 ? 'var(--color-lime)' : 'var(--color-warning)',
-          }}
-        />
+    <div className="flex items-center gap-1.5">
+      <div className="h-1 w-12 rounded-full overflow-hidden" style={{ background: '#E8E8E3' }}>
+        <div className="h-full rounded-full transition-all" style={{ width: `${score}%`, background: color }} />
       </div>
       <span className="text-[10px] font-medium whitespace-nowrap" style={{ color: 'var(--color-text-tertiary)' }}>
-        {score} · {label}
+        {label} {score}
       </span>
+    </div>
+  )
+}
+
+function ScoreBars({ relevance, fit }: { relevance: number; fit: number }) {
+  return (
+    <div className="mt-3 flex items-center gap-4">
+      <ScoreBadge label="Relevance" score={relevance} color={relevance > 60 ? 'var(--color-lime)' : 'var(--color-warning)'} />
+      <ScoreBadge label="Fit" score={fit} color={fit > 60 ? 'var(--color-success)' : fit > 40 ? 'var(--color-lime)' : 'var(--color-warning)'} />
     </div>
   )
 }
@@ -209,7 +211,7 @@ function HiringBadge({ ats }: { ats: SearchResult['ats'] }) {
 }
 
 export function CompanyCard({ result, active, onSelect, onSave, onFindPeople, saved }: CompanyCardProps) {
-  const { company, relevance_score, snippet, brief, ats } = result
+  const { company, relevance_score, fit_score, snippet, brief, ats } = result
   const domain = company.domain ?? ''
   const logoUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=64` : null
   const description = snippet ? truncateToSentence(snippet, 100) : null
@@ -279,7 +281,7 @@ export function CompanyCard({ result, active, onSelect, onSave, onFindPeople, sa
         </button>
       </div>
 
-      <RelevanceBar score={relevance_score} />
+      <ScoreBars relevance={relevance_score} fit={fit_score} />
 
       {/* Targeting Brief (when available) */}
       {brief && <BriefSection brief={brief} />}

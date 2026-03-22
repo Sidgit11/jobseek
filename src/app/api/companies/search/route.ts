@@ -15,65 +15,139 @@ function daysSince(dateStr: string): number {
   return (Date.now() - new Date(dateStr).getTime()) / (1000 * 60 * 60 * 24)
 }
 
-function scoreCompany(
+// ── RELEVANCE SCORE: How well does this company match the SEARCH QUERY? ──────
+// Factors: name match, funding stage match, sector match, geo match, keyword signals
+function scoreRelevance(
   company: Partial<Company>,
   intent: SearchIntent,
   snippet: string,
   rawQuery?: string,
-  atsData?: ATSResult | null,
 ): number {
-  let score = 50 // base
+  let score = 30 // base
 
-  // Name match bonus
+  const text = (snippet + ' ' + (company.description ?? '')).toLowerCase()
+
+  // Name match (strongest relevance signal)
   if (rawQuery) {
     const q = rawQuery.toLowerCase()
-    if (company.name && company.name.toLowerCase().includes(q)) score += 30
-    if (company.domain && company.domain.toLowerCase().includes(q)) score += 25
+    if (company.name && company.name.toLowerCase().includes(q)) score += 35
+    else if (company.domain && company.domain.toLowerCase().includes(q)) score += 25
   }
 
-  // Funding stage match
+  // Funding stage match (user asked for Series B → company is Series B)
   const fs = company.funding_stage?.toLowerCase() ?? ''
   const wantedStages = intent.fundingStages.map(s => s.toLowerCase())
-  if (wantedStages.some(s => fs.includes(s.replace('-', ' ').replace('_', ' ')))) score += 20
+  if (wantedStages.length > 0 && wantedStages.some(s => fs.includes(s.replace('-', ' ').replace('_', ' ')))) score += 20
 
-  // Recent funding
-  if (company.last_round_date) {
-    const months = (Date.now() - new Date(company.last_round_date).getTime()) / (1000 * 60 * 60 * 24 * 30)
-    if (months < 12) score += 15
-    else if (months < 24) score += 8
+  // Sector match (user asked for AI → company is AI)
+  if (intent.sectors.length > 0) {
+    const sectorMatches = intent.sectors.filter(s => text.includes(s)).length
+    score += Math.min(sectorMatches * 7, 20)
   }
 
-  // Signals
-  const text = (snippet + ' ' + (company.description ?? '')).toLowerCase()
+  // Geo match (user asked for India → company is in India)
+  if (intent.expandedGeo.length > 0) {
+    if (intent.expandedGeo.some(g => text.includes(g))) score += 15
+  }
+
+  // Signal match (user asked for hiring → company mentions hiring)
   if (intent.signals.includes('hiring') && (text.includes('hiring') || text.includes('join') || text.includes('team'))) score += 10
   if (intent.signals.includes('growth') && (text.includes('growth') || text.includes('scale') || text.includes('expanding'))) score += 8
 
-  // Headcount signal (startups preferred)
-  if (company.headcount && company.headcount < 200) score += 5
-
-  // ── Intent graph bonuses ──────────────────────────────────────────────────────
-  if (intent.implicitSignals.includes('small_team') && company.headcount && company.headcount < 100) score += 10
+  // Implicit signal match
+  if (intent.implicitSignals.includes('small_team') && company.headcount && company.headcount < 100) score += 5
   if (intent.implicitSignals.includes('recently_funded') && company.last_round_date) {
     const months = (Date.now() - new Date(company.last_round_date).getTime()) / (1000 * 60 * 60 * 24 * 30)
-    if (months < 6) score += 12
-  }
-  if (intent.sectors.length > 0) {
-    const sectorMatches = intent.sectors.filter(s => text.includes(s)).length
-    score += Math.min(sectorMatches * 5, 15)
-  }
-  if (intent.expandedGeo.length > 0) {
-    if (intent.expandedGeo.some(g => text.includes(g))) score += 10
+    if (months < 6) score += 8
   }
 
-  // ── ATS hiring signal bonuses ─────────────────────────────────────────────────
+  return Math.min(score, 100)
+}
+
+// ── FIT SCORE: How well does this company match the USER PROFILE? ────────────
+// Factors: ATS role match, industry overlap, stage preference, seniority alignment,
+// experience overlap, location match
+function scoreFit(
+  company: Partial<Company>,
+  userContext: CandidateContext,
+  snippet: string,
+  atsData?: ATSResult | null,
+): number {
+  let score = 20 // base
+
+  const text = (snippet + ' ' + (company.description ?? '')).toLowerCase()
+
+  // ── ATS hiring signals (strongest fit indicator) ──────────────────────────────
   if (atsData) {
-    if (atsData.total_open_roles > 0) score += 15
-    if (atsData.matched_roles.length > 0) score += 20
-    if (atsData.total_open_roles >= 5) score += 10 // hiring surge
+    if (atsData.matched_roles.length > 0) score += 25 // direct role match
+    else if (atsData.total_open_roles > 0) score += 10
+    if (atsData.total_open_roles >= 5) score += 5 // hiring surge
     const recentRoles = atsData.open_roles.filter(r =>
       r.posted_date && daysSince(r.posted_date) < 14
     )
-    if (recentRoles.length > 0) score += 8
+    if (recentRoles.length > 0) score += 5
+  }
+
+  // ── Industry match (user targets AI/ML → company is in AI) ────────────────────
+  if (userContext.targetIndustries.length > 0) {
+    const industryMatches = userContext.targetIndustries.filter(ind => {
+      const terms = ind.toLowerCase().split(/\s*[\/,]\s*/)
+      return terms.some(t => t.length > 2 && text.includes(t))
+    }).length
+    score += Math.min(industryMatches * 8, 15)
+  }
+
+  // ── Company stage preference match ────────────────────────────────────────────
+  if (userContext.companyStages.length > 0 && company.funding_stage) {
+    const fsLower = company.funding_stage.toLowerCase()
+    const stageMatch = userContext.companyStages.some(s =>
+      fsLower.includes(s.toLowerCase().replace('early stage ', '').replace(' stage', '').trim())
+    )
+    if (stageMatch) score += 12
+  }
+
+  // ── Location match ────────────────────────────────────────────────────────────
+  if (userContext.targetLocations.length > 0) {
+    const locMatch = userContext.targetLocations.some(loc =>
+      text.includes(loc.toLowerCase())
+    )
+    if (locMatch) score += 8
+  }
+
+  // ── Experience overlap (user worked at similar companies/domains) ──────────────
+  if (userContext.linkedinExperience && userContext.linkedinExperience.length > 0) {
+    for (const exp of userContext.linkedinExperience) {
+      const expCompany = exp.company.toLowerCase()
+      const expTitle = exp.title.toLowerCase()
+      // Check if user's past company or domain overlaps with target
+      if (text.includes(expCompany) || text.split(/\s+/).some(w => w.length > 4 && expCompany.includes(w))) {
+        score += 10
+        break
+      }
+      // Check if user's past role domain overlaps (e.g., "product" in both)
+      const roleWords = expTitle.split(/\s+/).filter(w => w.length > 3)
+      if (roleWords.some(w => text.includes(w))) {
+        score += 5
+        break
+      }
+    }
+  }
+
+  // ── Seniority alignment ───────────────────────────────────────────────────────
+  if (userContext.seniority && company.headcount) {
+    const isSenior = ['senior', 'lead', 'management', 'executive'].includes(userContext.seniority)
+    const isEarlyStage = company.headcount < 100
+    // Senior people + early-stage = high opportunity fit
+    if (isSenior && isEarlyStage) score += 10
+    // Mid-level + mid-size = good match
+    if (userContext.seniority === 'mid' && company.headcount >= 50 && company.headcount <= 500) score += 5
+  }
+
+  // ── Recent funding bonus (active hiring likelihood) ───────────────────────────
+  if (company.last_round_date) {
+    const months = (Date.now() - new Date(company.last_round_date).getTime()) / (1000 * 60 * 60 * 24 * 30)
+    if (months < 6) score += 8
+    else if (months < 12) score += 4
   }
 
   return Math.min(score, 100)
@@ -183,7 +257,8 @@ export async function POST(request: NextRequest) {
         ...crunchbaseData,
       }
 
-      const relevanceScore = scoreCompany(resolvedCompany, intent, '', query, atsData)
+      const relevanceScore = scoreRelevance(resolvedCompany, intent, '', query)
+      const fitScore = scoreFit(resolvedCompany, userContext, '', atsData)
 
       // Generate targeting brief
       let brief = undefined
@@ -197,6 +272,7 @@ export async function POST(request: NextRequest) {
       const result: SearchResult = {
         company: resolvedCompany,
         relevance_score: relevanceScore,
+        fit_score: fitScore,
         exa_score: 1.0,
         match_reasons: [],
         snippet: resolvedCompany.description,
@@ -344,11 +420,13 @@ export async function POST(request: NextRequest) {
       if (upsertError) log.warn(`DB upsert failed for ${r.domain}`, upsertError.message)
 
       const atsData = atsMap.get(r.domain) ?? null
-      const score = scoreCompany(resolvedCompany, intent, r.snippet, query, atsData)
+      const relevance = scoreRelevance(resolvedCompany, intent, r.snippet, query)
+      const fit = scoreFit(resolvedCompany, userContext, r.snippet, atsData)
 
       results.push({
         company: resolvedCompany,
-        relevance_score: score,
+        relevance_score: relevance,
+        fit_score: fit,
         exa_score: r.score ?? 0,
         match_reasons: [],
         snippet: r.snippet,
@@ -360,11 +438,15 @@ export async function POST(request: NextRequest) {
 
     log.step('5-scored', {
       results: results.length,
-      topScores: results.slice(0, 5).map(r => ({ name: r.company.name, score: r.relevance_score, ats: !!r.ats })),
+      topScores: results.slice(0, 5).map(r => ({ name: r.company.name, relevance: r.relevance_score, fit: r.fit_score, ats: !!r.ats })),
     })
 
-    // Sort by relevance
-    results.sort((a, b) => b.relevance_score - a.relevance_score)
+    // Sort by combined score (relevance * 0.4 + fit * 0.6) — fit matters more
+    results.sort((a, b) => {
+      const aCombo = a.relevance_score * 0.4 + a.fit_score * 0.6
+      const bCombo = b.relevance_score * 0.4 + b.fit_score * 0.6
+      return bCombo - aCombo
+    })
 
     // Company name filter
     if (intent.companyName && intent.confidence >= 0.7) {
