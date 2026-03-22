@@ -159,8 +159,39 @@ function BriefSection({ brief }: { brief: TargetingBrief }) {
   )
 }
 
+function HiringBadge({ ats }: { ats: SearchResult['ats'] }) {
+  if (!ats || ats.total_open_roles === 0) return null
+  const hasMatched = ats.matched_roles.length > 0
+  const topMatch = ats.matched_roles[0]
+  const daysAgo = topMatch?.posted_date
+    ? Math.floor((Date.now() - new Date(topMatch.posted_date).getTime()) / (1000 * 60 * 60 * 24))
+    : null
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      <span
+        className="rounded-full px-2.5 py-0.5 text-[10px] font-bold"
+        style={{ background: 'rgba(34,197,94,0.12)', color: 'var(--color-success)', border: '1px solid rgba(34,197,94,0.2)' }}
+      >
+        {ats.total_open_roles} open role{ats.total_open_roles !== 1 ? 's' : ''}
+      </span>
+      {hasMatched && topMatch && (
+        <span
+          className="rounded-full px-2 py-0.5 text-[10px] font-medium"
+          style={{ background: 'var(--color-lime-subtle)', color: 'var(--color-lime-text)' }}
+        >
+          {topMatch.title}{daysAgo !== null && daysAgo < 30 ? ` (${daysAgo}d ago)` : ''}
+        </span>
+      )}
+      <span className="text-[9px] font-medium" style={{ color: 'var(--color-text-tertiary)' }}>
+        via {ats.ats}
+      </span>
+    </div>
+  )
+}
+
 export function CompanyCard({ result, active, onSelect, onSave, onFindPeople, saved }: CompanyCardProps) {
-  const { company, relevance_score, snippet, brief } = result
+  const { company, relevance_score, snippet, brief, ats } = result
   const domain = company.domain ?? ''
   const logoUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=64` : null
   const description = snippet ? truncateToSentence(snippet, 100) : null
@@ -213,6 +244,7 @@ export function CompanyCard({ result, active, onSelect, onSave, onFindPeople, sa
           {company.investors && company.investors.length > 0 && (
             <InvestorPills investors={company.investors} />
           )}
+          <HiringBadge ats={ats} />
         </div>
 
         {/* Bookmark (save) button */}

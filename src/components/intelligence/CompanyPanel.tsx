@@ -382,6 +382,68 @@ export function CompanyPanel({ result, onClose, onSave, saved, overrideIntel, ov
               <PanelOpeningLine text={brief.openingLine} />
             )}
 
+            {/* OPEN ROLES — from ATS probe */}
+            {result.ats && result.ats.total_open_roles > 0 && (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-tertiary)' }}>
+                    Open Roles ({result.ats.total_open_roles})
+                  </p>
+                  <span
+                    className="rounded-full px-2 py-0.5 text-[9px] font-medium"
+                    style={{ background: 'rgba(107,114,128,0.08)', color: 'var(--color-text-tertiary)' }}
+                  >
+                    via {result.ats.ats}
+                  </span>
+                </div>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                  {(result.ats.matched_roles.length > 0
+                    ? [...result.ats.matched_roles, ...result.ats.open_roles.filter(r => !result.ats!.matched_roles.includes(r))]
+                    : result.ats.open_roles
+                  ).slice(0, 10).map((role, i) => {
+                    const isMatched = result.ats!.matched_roles.includes(role)
+                    const daysAgo = role.posted_date
+                      ? Math.floor((Date.now() - new Date(role.posted_date).getTime()) / (1000 * 60 * 60 * 24))
+                      : null
+                    return (
+                      <a
+                        key={i}
+                        href={role.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-between rounded-lg px-3 py-2 text-xs transition-colors hover:brightness-95"
+                        style={{
+                          background: isMatched ? 'var(--color-lime-subtle)' : 'var(--color-surface)',
+                          border: `1px solid ${isMatched ? 'var(--color-lime-border)' : '#E8E8E3'}`,
+                        }}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <span className="font-medium" style={{ color: isMatched ? 'var(--color-lime-text)' : 'var(--color-text-primary)' }}>
+                            {role.title}
+                          </span>
+                          {(role.department || role.location) && (
+                            <span className="ml-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                              {[role.department, role.location].filter(Boolean).join(' · ')}
+                            </span>
+                          )}
+                        </div>
+                        {daysAgo !== null && daysAgo < 60 && (
+                          <span className="flex-shrink-0 ml-2 text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                            {daysAgo}d ago
+                          </span>
+                        )}
+                      </a>
+                    )
+                  })}
+                </div>
+                {result.ats.total_open_roles > 10 && (
+                  <p className="mt-1.5 text-[10px] text-center" style={{ color: 'var(--color-text-tertiary)' }}>
+                    +{result.ats.total_open_roles - 10} more roles
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Key People — moved up to be right after Why This Fits You */}
             <div>
               <button

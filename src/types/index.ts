@@ -125,6 +125,26 @@ export interface SearchIntent {
   implicitSignals: string[]       // inferred context: ["recently_funded", "small_team", "pm_gap"]
 }
 
+export type ATSPlatform = 'greenhouse' | 'lever' | 'ashby' | 'workable' | 'recruitee'
+
+export interface ATSJobPosting {
+  title: string
+  location: string | null
+  department: string | null
+  posted_date: string | null
+  url: string
+  employment_type: string | null
+}
+
+export interface ATSResult {
+  ats: ATSPlatform
+  slug: string
+  open_roles: ATSJobPosting[]
+  total_open_roles: number
+  matched_roles: ATSJobPosting[]
+  probed_at: string
+}
+
 export interface TargetingBrief {
   whyNow: string[]        // 2-3 time-sensitive signals
   yourAngle: string        // personalized pitch based on user background
@@ -142,6 +162,8 @@ export interface SearchResult {
   published_date: string | null
   // Targeting brief (populated for top results)
   brief?: TargetingBrief
+  // ATS job board data (populated when company found on an ATS)
+  ats?: ATSResult
 }
 
 export interface CompanyIntelligence {

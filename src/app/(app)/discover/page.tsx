@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { CompanyCard } from '@/components/discovery/CompanyCard'
 import { CompanyPanel } from '@/components/intelligence/CompanyPanel'
 import { CompanyCardSkeleton } from '@/components/shared/LoadingSkeleton'
+import { SearchLoader } from '@/components/discovery/SearchLoader'
 import type { SearchResult } from '@/types'
 
 const SUGGESTED_QUERIES = [
@@ -218,7 +219,8 @@ function DiscoverPageInner() {
             </div>
           ) : searching ? (
             <div className="space-y-3">
-              {[1, 2, 3, 4].map(i => <CompanyCardSkeleton key={i} />)}
+              <SearchLoader active={searching} />
+              {[1, 2].map(i => <CompanyCardSkeleton key={i} />)}
             </div>
           ) : results.length === 0 ? (
             <div className="py-16 text-center">
