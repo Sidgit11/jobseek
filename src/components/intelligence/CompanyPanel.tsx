@@ -1,12 +1,12 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { X, ExternalLink, Users, TrendingUp, Bookmark, BookmarkCheck, ChevronDown, AlertTriangle, CheckCircle } from 'lucide-react'
+import { X, ExternalLink, Users, TrendingUp, Bookmark, BookmarkCheck, ChevronDown, AlertTriangle, CheckCircle, Zap, Target, MessageSquareQuote, Copy, Check } from 'lucide-react'
 import { toast } from 'sonner'
 import { PersonCard } from './PersonCard'
 import { OutreachGenerator } from '@/components/outreach/OutreachGenerator'
 import { PanelSkeleton } from '@/components/shared/LoadingSkeleton'
-import type { Company, Person, NewsItem, SearchResult } from '@/types'
+import type { Company, Person, NewsItem, SearchResult, TargetingBrief } from '@/types'
 
 interface CompanyPanelProps {
   result: SearchResult
@@ -43,6 +43,35 @@ const fadeInUpKeyframes = `
 }
 `
 
+function PanelOpeningLine({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="rounded-xl p-4" style={{ background: 'rgba(107,114,128,0.04)', border: '1px solid #E8E8E3' }}>
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-1.5">
+          <MessageSquareQuote size={13} style={{ color: 'var(--color-text-tertiary)' }} />
+          <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-tertiary)' }}>Opening Line</span>
+        </div>
+        <button
+          onClick={() => {
+            navigator.clipboard.writeText(text)
+            setCopied(true)
+            setTimeout(() => setCopied(false), 2000)
+          }}
+          className="flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition-all hover:bg-black/5"
+          style={{ color: copied ? 'var(--color-success)' : 'var(--color-text-tertiary)' }}
+        >
+          {copied ? <Check size={11} /> : <Copy size={11} />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <p className="text-sm leading-relaxed italic" style={{ color: 'var(--color-text-secondary)' }}>
+        &ldquo;{text}&rdquo;
+      </p>
+    </div>
+  )
+}
+
 export function CompanyPanel({ result, onClose, onSave, saved, overrideIntel, overridePeople, overrideOutreach, overrideEmails, autoLoadPeople, onFindPeople }: CompanyPanelProps) {
   const [intel, setIntel] = useState<Intelligence | null>(overrideIntel ?? null)
   const [loading, setLoading] = useState(!overrideIntel)
@@ -54,6 +83,8 @@ export function CompanyPanel({ result, onClose, onSave, saved, overrideIntel, ov
   // Email reveal state: personId → revealed email string
   const [foundEmails, setFoundEmails] = useState<Record<string, string>>({})
   const [emailLoadingFor, setEmailLoadingFor] = useState<string | null>(null)
+  const [brief, setBrief] = useState<TargetingBrief | null>(result.brief ?? null)
+  const [briefLoading, setBriefLoading] = useState(false)
   const autoLoadTriggered = useRef(false)
 
   const company = intel?.company ?? result.company
@@ -66,6 +97,8 @@ export function CompanyPanel({ result, onClose, onSave, saved, overrideIntel, ov
     setSelectedPerson(null)
     setFoundEmails({})
     setEmailLoadingFor(null)
+    setBrief(result.brief ?? null)
+    setBriefLoading(false)
     autoLoadTriggered.current = false
 
     // Demo mode: use pre-baked data, skip API
@@ -79,6 +112,21 @@ export function CompanyPanel({ result, onClose, onSave, saved, overrideIntel, ov
       })
       .catch(() => setLoading(false))
   }, [result.company.id, overrideIntel])
+
+  // Lazy-load brief when panel opens and no brief exists
+  useEffect(() => {
+    if (brief || briefLoading || overrideIntel) return
+    // Only fetch if company has a real DB id (not demo)
+    if (result.company.id.startsWith('demo-')) return
+    setBriefLoading(true)
+    fetch(`/api/companies/${result.company.id}/brief`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.brief) setBrief(data.brief)
+      })
+      .catch(() => {})
+      .finally(() => setBriefLoading(false))
+  }, [result.company.id, brief, briefLoading, overrideIntel])
 
   // Auto-load people when autoLoadPeople prop is true
   useEffect(() => {
@@ -258,6 +306,33 @@ export function CompanyPanel({ result, onClose, onSave, saved, overrideIntel, ov
           <PanelSkeleton />
         ) : (
           <div className="p-5 space-y-5">
+            {/* WHY NOW — Targeting Brief */}
+            {brief && brief.whyNow.length > 0 && (
+              <div className="rounded-xl p-4" style={{ background: 'rgba(163,230,53,0.06)', border: '1px solid rgba(163,230,53,0.15)' }}>
+                <div className="flex items-center gap-1.5 mb-2">
+                  <Zap size={13} style={{ color: 'var(--color-lime)' }} />
+                  <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-lime-text)' }}>Why Now</span>
+                </div>
+                <ul className="space-y-1.5">
+                  {brief.whyNow.map((signal, i) => (
+                    <li key={i} className="flex items-start gap-2 text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                      <span className="mt-1.5 flex-shrink-0 h-1.5 w-1.5 rounded-full" style={{ background: 'var(--color-lime)' }} />
+                      {signal}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {briefLoading && !brief && (
+              <div className="rounded-xl p-4 animate-pulse" style={{ background: 'rgba(163,230,53,0.04)', border: '1px solid rgba(163,230,53,0.1)' }}>
+                <div className="h-3 w-20 rounded bg-gray-200 mb-3" />
+                <div className="space-y-2">
+                  <div className="h-3 w-full rounded bg-gray-200" />
+                  <div className="h-3 w-3/4 rounded bg-gray-200" />
+                </div>
+              </div>
+            )}
+
             {/* AI Summary */}
             {company.summary && (
               <div>
@@ -270,8 +345,21 @@ export function CompanyPanel({ result, onClose, onSave, saved, overrideIntel, ov
               </div>
             )}
 
-            {/* Why This Fits You */}
-            {company.why_fit && (
+            {/* YOUR ANGLE — from brief, or fallback to why_fit */}
+            {brief?.yourAngle ? (
+              <div
+                className="rounded-xl p-4"
+                style={{ background: 'rgba(14,165,233,0.05)', border: '1px solid rgba(14,165,233,0.12)', borderLeft: '3px solid #38BDF8' }}
+              >
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <Target size={13} style={{ color: '#38BDF8' }} />
+                  <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#38BDF8' }}>Your Angle</span>
+                </div>
+                <p className="text-sm leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                  {brief.yourAngle}
+                </p>
+              </div>
+            ) : company.why_fit ? (
               <div
                 className="rounded-xl p-4"
                 style={{
@@ -287,6 +375,11 @@ export function CompanyPanel({ result, onClose, onSave, saved, overrideIntel, ov
                   {company.why_fit}
                 </p>
               </div>
+            ) : null}
+
+            {/* OPENING LINE — from brief */}
+            {brief?.openingLine && (
+              <PanelOpeningLine text={brief.openingLine} />
             )}
 
             {/* Key People — moved up to be right after Why This Fits You */}

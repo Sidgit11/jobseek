@@ -5,13 +5,14 @@ import { searchCompanies } from '@/lib/exa/search'
 import { enrichCompany } from '@/lib/crunchbase/enrich'
 import { generateFallbackCompanies } from '@/lib/anthropic/company-discovery'
 import { getDemoCompanies } from '@/lib/demo/companies'
+import { generateTargetingBrief } from '@/lib/anthropic/targeting-brief'
 import { routeLogger } from '@/lib/logger'
-import type { Company, SearchResult, CandidateContext } from '@/types'
+import type { Company, SearchResult, SearchIntent, CandidateContext } from '@/types'
 
-function scoreCompany(company: Partial<Company>, intent: { signals: string[]; fundingStages: string[] }, snippet: string, rawQuery?: string): number {
+function scoreCompany(company: Partial<Company>, intent: SearchIntent, snippet: string, rawQuery?: string): number {
   let score = 50 // base
 
-  // Name match bonus: if the company name contains the search query, boost strongly
+  // Name match bonus
   if (rawQuery) {
     const q = rawQuery.toLowerCase()
     if (company.name && company.name.toLowerCase().includes(q)) score += 30
@@ -37,6 +38,31 @@ function scoreCompany(company: Partial<Company>, intent: { signals: string[]; fu
 
   // Headcount signal (startups preferred)
   if (company.headcount && company.headcount < 200) score += 5
+
+  // ── Intent graph bonuses ──────────────────────────────────────────────────────
+
+  // Implicit signal: small_team + actually small headcount
+  if (intent.implicitSignals.includes('small_team') && company.headcount && company.headcount < 100) {
+    score += 10
+  }
+
+  // Implicit signal: recently_funded + confirmed recent round
+  if (intent.implicitSignals.includes('recently_funded') && company.last_round_date) {
+    const months = (Date.now() - new Date(company.last_round_date).getTime()) / (1000 * 60 * 60 * 24 * 30)
+    if (months < 6) score += 12
+  }
+
+  // Sector match: bonus for each matching sector in description
+  if (intent.sectors.length > 0) {
+    const sectorMatches = intent.sectors.filter(s => text.includes(s)).length
+    score += Math.min(sectorMatches * 5, 15) // cap at +15
+  }
+
+  // Expanded geo match: bonus if company description mentions target cities
+  if (intent.expandedGeo.length > 0) {
+    const geoMatch = intent.expandedGeo.some(g => text.includes(g))
+    if (geoMatch) score += 10
+  }
 
   return Math.min(score, 100)
 }
@@ -76,10 +102,15 @@ export async function POST(request: NextRequest) {
 
     // 1. Extract intent with Gemini
     const intent = await extractSearchIntent(query, userContext)
-    log.step('gemini:intent', { industries: intent.industries, fundingStages: intent.fundingStages, keywords: intent.keywords })
+    log.step('gemini:intent', {
+      industries: intent.industries, fundingStages: intent.fundingStages, keywords: intent.keywords,
+      companyName: intent.companyName, confidence: intent.confidence,
+      sectors: intent.sectors, expandedGeo: intent.expandedGeo, implicitSignals: intent.implicitSignals,
+      roleSignal: intent.roleSignal, temporal: intent.temporal,
+    })
 
-    // 2. Search with Exa (or fall back to Gemini, then to hardcoded demo data)
-    let exaResults = await searchCompanies(intent.keywords)
+    // 2. Search with Exa using full intent graph (or fall back to Gemini, then to hardcoded demo data)
+    let exaResults = await searchCompanies(intent)
     let usingFallback = false
     log.step('exa:search', { keywords: intent.keywords, results: exaResults.length })
 
@@ -208,6 +239,40 @@ export async function POST(request: NextRequest) {
 
     // Sort by relevance
     results.sort((a, b) => b.relevance_score - a.relevance_score)
+
+    // 4b. Company name filter: when intent has a specific company name with high confidence,
+    // boost matching results and demote non-matching ones
+    if (intent.companyName && intent.confidence >= 0.7) {
+      const targetName = intent.companyName.toLowerCase()
+      const filtered = results.filter(r => {
+        const name = r.company.name.toLowerCase()
+        const domain = (r.company.domain ?? '').toLowerCase()
+        return name.includes(targetName) || targetName.includes(name) || domain.includes(targetName.replace(/\s+/g, ''))
+      })
+      // If we found matching results, use those; otherwise keep all (don't break the experience)
+      if (filtered.length > 0) {
+        // Put matching results first, then the rest
+        const nonMatching = results.filter(r => !filtered.includes(r))
+        results.length = 0
+        results.push(...filtered, ...nonMatching)
+        log.step('company-filter', { companyName: intent.companyName, matched: filtered.length, total: results.length })
+      }
+    }
+
+    // 5. Generate targeting briefs for top 5 results (parallel)
+    const TOP_N_BRIEFS = 5
+    const briefTargets = results.slice(0, TOP_N_BRIEFS)
+    const briefResults = await Promise.allSettled(
+      briefTargets.map(r =>
+        generateTargetingBrief(r.company, intent, userContext, r.snippet ?? '')
+      )
+    )
+    for (let i = 0; i < briefResults.length; i++) {
+      if (briefResults[i].status === 'fulfilled') {
+        results[i].brief = (briefResults[i] as PromiseFulfilledResult<typeof results[0]['brief']>).value
+      }
+    }
+    log.step('briefs:generated', { count: briefResults.filter(b => b.status === 'fulfilled').length })
 
     // Save query
     const { data: savedQuery } = await supabase

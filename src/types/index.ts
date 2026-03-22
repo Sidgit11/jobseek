@@ -115,6 +115,20 @@ export interface SearchIntent {
   signals: string[]
   companySize: 'startup' | 'mid' | 'enterprise' | 'any'
   keywords: string[]
+  // Intent graph extensions
+  companyName: string | null       // explicit company name: "Microsoft", "Stripe"
+  confidence: number               // 0-1 overall intent confidence from Gemini
+  sectors: string[]               // normalized from industries: ["ai", "ml", "nlp"]
+  expandedGeo: string[]           // expanded from geography: ["india", "bangalore", "mumbai"]
+  roleSignal: string | null       // normalized target role: "product_manager"
+  temporal: 'active_hiring' | 'recently_funded' | 'any' | null
+  implicitSignals: string[]       // inferred context: ["recently_funded", "small_team", "pm_gap"]
+}
+
+export interface TargetingBrief {
+  whyNow: string[]        // 2-3 time-sensitive signals
+  yourAngle: string        // personalized pitch based on user background
+  openingLine: string      // cold outreach opener
 }
 
 export interface SearchResult {
@@ -126,6 +140,8 @@ export interface SearchResult {
   snippet: string | null
   url: string | null
   published_date: string | null
+  // Targeting brief (populated for top results)
+  brief?: TargetingBrief
 }
 
 export interface CompanyIntelligence {

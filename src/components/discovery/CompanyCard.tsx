@@ -1,7 +1,8 @@
 'use client'
 
-import { Bookmark, BookmarkCheck, ArrowRight } from 'lucide-react'
-import type { SearchResult } from '@/types'
+import { useState } from 'react'
+import { Bookmark, BookmarkCheck, ArrowRight, Zap, Target, MessageSquareQuote, Copy, Check } from 'lucide-react'
+import type { SearchResult, TargetingBrief } from '@/types'
 
 interface CompanyCardProps {
   result: SearchResult
@@ -90,8 +91,76 @@ function truncateToSentence(text: string, maxLen: number): string {
   return firstSentence.slice(0, maxLen).trimEnd() + '...'
 }
 
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      onClick={e => {
+        e.stopPropagation()
+        navigator.clipboard.writeText(text)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      }}
+      className="flex-shrink-0 rounded-md p-1 transition-all hover:bg-black/5"
+      title="Copy to clipboard"
+    >
+      {copied
+        ? <Check size={12} style={{ color: 'var(--color-success)' }} />
+        : <Copy size={12} style={{ color: 'var(--color-text-tertiary)' }} />
+      }
+    </button>
+  )
+}
+
+function BriefSection({ brief }: { brief: TargetingBrief }) {
+  return (
+    <div className="mt-3 space-y-2.5" onClick={e => e.stopPropagation()}>
+      {/* WHY NOW */}
+      <div className="rounded-xl p-3" style={{ background: 'rgba(163,230,53,0.06)', border: '1px solid rgba(163,230,53,0.15)' }}>
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <Zap size={12} style={{ color: 'var(--color-lime)' }} />
+          <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-lime-text)' }}>Why Now</span>
+        </div>
+        <ul className="space-y-1">
+          {brief.whyNow.map((signal, i) => (
+            <li key={i} className="flex items-start gap-1.5 text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+              <span className="mt-1 flex-shrink-0 h-1 w-1 rounded-full" style={{ background: 'var(--color-lime)' }} />
+              {signal}
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* YOUR ANGLE */}
+      <div className="rounded-xl p-3" style={{ background: 'rgba(14,165,233,0.05)', border: '1px solid rgba(14,165,233,0.12)' }}>
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <Target size={12} style={{ color: '#38BDF8' }} />
+          <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#38BDF8' }}>Your Angle</span>
+        </div>
+        <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+          {brief.yourAngle}
+        </p>
+      </div>
+
+      {/* OPENING LINE */}
+      <div className="rounded-xl p-3" style={{ background: 'rgba(107,114,128,0.04)', border: '1px solid #E8E8E3' }}>
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="flex items-center gap-1.5">
+            <MessageSquareQuote size={12} style={{ color: 'var(--color-text-tertiary)' }} />
+            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-tertiary)' }}>Opening Line</span>
+          </div>
+          <CopyButton text={brief.openingLine} />
+        </div>
+        <p className="text-[11px] leading-relaxed italic" style={{ color: 'var(--color-text-secondary)' }}>
+          &ldquo;{brief.openingLine}&rdquo;
+        </p>
+      </div>
+    </div>
+  )
+}
+
 export function CompanyCard({ result, active, onSelect, onSave, onFindPeople, saved }: CompanyCardProps) {
-  const { company, relevance_score, snippet } = result
+  const { company, relevance_score, snippet, brief } = result
   const domain = company.domain ?? ''
   const logoUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=64` : null
   const description = snippet ? truncateToSentence(snippet, 100) : null
@@ -161,6 +230,9 @@ export function CompanyCard({ result, active, onSelect, onSave, onFindPeople, sa
       </div>
 
       <RelevanceBar score={relevance_score} />
+
+      {/* Targeting Brief (when available) */}
+      {brief && <BriefSection brief={brief} />}
 
       {/* Find People CTA */}
       <div className="mt-3 flex justify-end">

@@ -1,4 +1,4 @@
-import type { NewsItem } from '@/types'
+import type { NewsItem, SearchIntent } from '@/types'
 
 interface ExaSearchResult {
   id: string
@@ -46,22 +46,15 @@ export interface CompanySearchResult {
   snippet: string
   published_date: string | null
   score: number
-  // Source metadata for debugging and ranking
   source: 'company_page' | 'news_extracted' | 'direct_lookup'
-  funding_context?: string  // funding stage / ARR found in news pass
+  funding_context?: string
 }
 
 // Words that signal a result is a news headline, not a company homepage
 const NEWS_VERBS = /\b(raises|raised|launches|launched|acquires|acquired|announces|announced|hires|hired|closes|closed|secures|secured|wins|won|expands|expanded|partners|partnered|releases|released|funding|round|billion|million|series [a-e]|ipo|valued)\b/i
 
-// Detect revenue-threshold queries — Exa can't filter by ARR/revenue directly
+// Detect revenue-threshold queries
 const REVENUE_PATTERN = /(\$?\d+[km]?\+?\s*(arr|mrr|revenue|annual recurring|million|m\b))|(\d+\s*million\s*(revenue|arr|mrr))/i
-
-// Detect geographic terms in query
-const GEO_TERMS = /\b(india|bangalore|bengaluru|mumbai|delhi|hyderabad|chennai|us|usa|nyc|new york|london|singapore|europe|latam|remote)\b/i
-
-// Funding stage terms
-const FUNDING_TERMS = /\b(seed|pre-seed|series [a-f]|series a|series b|series c|growth|late stage|pre-ipo|bootstrap)\b/i
 
 /** Extract apex domain: app.stripe.com → stripe.com */
 function getApexDomain(hostname: string): string {
@@ -125,33 +118,10 @@ function isDirectCompanyLookup(query: string): boolean {
   return true
 }
 
-/**
- * Classify what kind of search the user wants so we can route to the right Exa strategy.
- */
-function classifyQuery(keywords: string[]): {
-  isRevenue: boolean
-  isHiring: boolean
-  isDirect: boolean
-  hasGeo: boolean
-  hasFundingStage: boolean
-  rawQuery: string
-} {
-  const rawQuery = keywords.join(' ')
-  return {
-    isRevenue:       REVENUE_PATTERN.test(rawQuery),
-    isHiring:        /\b(hiring|jobs|roles|open positions|recruiting)\b/i.test(rawQuery),
-    isDirect:        isDirectCompanyLookup(rawQuery),
-    hasGeo:          GEO_TERMS.test(rawQuery),
-    hasFundingStage: FUNDING_TERMS.test(rawQuery),
-    rawQuery,
-  }
-}
-
 function deduplicateByDomain(results: CompanySearchResult[]): CompanySearchResult[] {
   const seen = new Map<string, CompanySearchResult>()
   for (const r of results) {
     const existing = seen.get(r.domain)
-    // Prefer company_page source over news_extracted; then higher score
     if (!existing) {
       seen.set(r.domain, r)
     } else if (r.source === 'company_page' && existing.source !== 'company_page') {
@@ -164,9 +134,70 @@ function deduplicateByDomain(results: CompanySearchResult[]): CompanySearchResul
 }
 
 /**
+ * Build a rich query string from intent fields for company page search.
+ */
+function buildCompanyQuery(intent: SearchIntent): string {
+  const parts: string[] = [...intent.keywords]
+
+  // Add top sectors if not already in keywords
+  for (const sector of intent.sectors.slice(0, 2)) {
+    if (!parts.some(p => p.toLowerCase().includes(sector))) {
+      parts.push(sector)
+    }
+  }
+
+  // Add expanded geo terms (top 3 cities) if not already present
+  for (const geo of intent.expandedGeo.slice(0, 3)) {
+    if (!parts.some(p => p.toLowerCase().includes(geo))) {
+      parts.push(geo)
+    }
+  }
+
+  // Add role context for hiring queries
+  if (intent.roleSignal && intent.temporal === 'active_hiring') {
+    const roleReadable = intent.roleSignal.replace(/_/g, ' ')
+    if (!parts.some(p => p.toLowerCase().includes(roleReadable))) {
+      parts.push(`hiring ${roleReadable}`)
+    }
+  }
+
+  return parts.join(' ')
+}
+
+/**
+ * Build a news query string enhanced by implicit signals.
+ */
+function buildNewsQuery(intent: SearchIntent): string {
+  const parts: string[] = [...intent.keywords]
+
+  if (intent.implicitSignals.includes('recently_funded')) {
+    parts.push('raised funding round 2025 2026')
+  } else {
+    parts.push('funding announcement 2024 2025')
+  }
+
+  if (intent.temporal === 'active_hiring') {
+    parts.push('hiring expanding team')
+  }
+
+  return parts.join(' ')
+}
+
+/**
+ * Determine date range for news search based on temporal signal.
+ */
+function getNewsDateRange(intent: SearchIntent): string {
+  const now = Date.now()
+  if (intent.temporal === 'recently_funded' || intent.implicitSignals.includes('recently_funded')) {
+    // Tighter window: 6 months for recently funded
+    return new Date(now - 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  }
+  // Default: 12 months
+  return new Date(now - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+}
+
+/**
  * PRIMARY SEARCH: category:company — returns actual company homepages.
- * Best for: discovery queries, geographic/stage/role filters.
- * Note: date filters are NOT supported in category:company mode.
  */
 async function searchCompanyPages(query: string, numResults = 20): Promise<CompanySearchResult[]> {
   const data = await exaRequest('/search', {
@@ -203,11 +234,10 @@ async function searchCompanyPages(query: string, numResults = 20): Promise<Compa
 
 /**
  * NEWS CONTEXT PASS: neural search on tech/startup news domains.
- * Used to find funding context (stage, investors, ARR) and extract company names.
- * Returns company domains extracted from news coverage.
  */
 async function searchNewsForCompanies(
   query: string,
+  startDate: string,
   numResults = 15
 ): Promise<CompanySearchResult[]> {
   const newsDomains = [
@@ -222,23 +252,18 @@ async function searchNewsForCompanies(
     type: 'neural',
     useAutoprompt: true,
     includeDomains: newsDomains,
-    startPublishedDate: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    startPublishedDate: startDate,
     contents: {
       summary: { query: 'company name funding stage ARR revenue investors hiring' },
     },
   })
 
-  // Extract company domains from news articles — look for company homepage links
-  // For now, extract company name from title and mark as news_extracted
   const results: CompanySearchResult[] = []
   for (const r of data.results) {
     if (!r.url || !r.title) continue
-    // News articles aren't company pages — we capture context only
-    // The company name is the subject of the article (before " Raises", " Hits", " Launches" etc.)
     const companyName = r.title.split(/\s+(raises|hits|reaches|surpasses|launches|acquires|closes|secures|announces)\s/i)[0]?.trim()
     if (!companyName || companyName.length > 60) continue
 
-    // Guess domain from company name — will be enriched/corrected by Crunchbase later
     const guessedDomain = companyName.toLowerCase()
       .replace(/[^a-z0-9\s]/g, '')
       .replace(/\s+/g, '') + '.com'
@@ -246,7 +271,7 @@ async function searchNewsForCompanies(
     results.push({
       name: companyName,
       domain: guessedDomain,
-      url: r.url,   // points to news article, not company
+      url: r.url,
       snippet: r.summary ?? r.text?.slice(0, 200) ?? '',
       published_date: r.publishedDate ?? null,
       score: r.score ?? 0.3,
@@ -259,38 +284,33 @@ async function searchNewsForCompanies(
 
 /**
  * REVENUE QUERY STRATEGY:
- * Exa cannot filter by revenue threshold — treat these queries as
- * "companies that announced $X ARR milestone" and search press releases.
+ * Exa cannot filter by revenue threshold — search press releases for ARR milestones.
  */
 async function searchRevenueCompanies(rawQuery: string): Promise<CompanySearchResult[]> {
-  // Extract the revenue number to make the news query more specific
   const match = rawQuery.match(/(\$?\d+[km]?)\s*(arr|mrr|revenue|million|m\b)/i)
   const revenueStr = match ? match[0] : '10 million ARR'
 
   const newsQuery = `startup company ${revenueStr} annual recurring revenue milestone 2024 2025`
-  return searchNewsForCompanies(newsQuery, 12)
+  const startDate = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  return searchNewsForCompanies(newsQuery, startDate, 12)
 }
 
-export async function searchCompanies(keywords: string[]): Promise<CompanySearchResult[]> {
-  const { isRevenue, isHiring, isDirect, hasGeo, hasFundingStage, rawQuery } = classifyQuery(keywords)
+/**
+ * Main search entry point — accepts full SearchIntent for richer query construction.
+ */
+export async function searchCompanies(intent: SearchIntent): Promise<CompanySearchResult[]> {
+  const rawQuery = intent.keywords.join(' ')
+  const isDirect = isDirectCompanyLookup(rawQuery)
+  const isRevenue = REVENUE_PATTERN.test(rawQuery)
 
-  // ── Path 1: Direct company lookup (e.g. "Razorpay", "Stripe", "Microsoft") ─
-  // For direct lookups, we do TWO things:
-  // 1. Construct a synthetic top result from the company name (guaranteed match)
-  // 2. Also search Exa for the company to get a proper description + related companies
+  // ── Path 1: Direct company lookup ─────────────────────────────────────────────
   if (isDirect) {
     const queryLower = rawQuery.toLowerCase().replace(/\s+/g, '')
-
-    // Common TLD guesses for the company domain
     const domainGuesses = [
-      `${queryLower}.com`,
-      `${queryLower}.io`,
-      `${queryLower}.ai`,
-      `${queryLower}.co`,
-      `${queryLower}.app`,
+      `${queryLower}.com`, `${queryLower}.io`, `${queryLower}.ai`,
+      `${queryLower}.co`, `${queryLower}.app`,
     ]
 
-    // Search Exa to find the actual company page + get a description
     const data = await exaRequest('/search', {
       query: `${rawQuery} official website company`,
       numResults: 10,
@@ -313,15 +333,14 @@ export async function searchCompanies(keywords: string[]): Promise<CompanySearch
       const nameMatch = name.toLowerCase().includes(queryLower) || domain.includes(queryLower)
 
       if (nameMatch && !foundExactMatch) {
-        // This IS the company — boost it to the top
         foundExactMatch = true
         results.unshift({
-          name: rawQuery, // Use the exact query as the name (e.g. "Microsoft")
+          name: rawQuery,
           domain,
           url: r.url,
           snippet: r.summary ?? r.text?.slice(0, 200) ?? '',
           published_date: r.publishedDate ?? null,
-          score: 1.0, // Maximum score for exact match
+          score: 1.0,
           source: 'direct_lookup',
         })
       } else if (!isNewsDomain(domain)) {
@@ -337,11 +356,10 @@ export async function searchCompanies(keywords: string[]): Promise<CompanySearch
       }
     }
 
-    // If Exa didn't find the exact company, create a synthetic result
     if (!foundExactMatch) {
       results.unshift({
         name: rawQuery,
-        domain: domainGuesses[0], // Best guess: company.com
+        domain: domainGuesses[0],
         url: `https://${domainGuesses[0]}`,
         snippet: `${rawQuery} — search for more details about this company.`,
         published_date: null,
@@ -353,33 +371,34 @@ export async function searchCompanies(keywords: string[]): Promise<CompanySearch
     return deduplicateByDomain(results).slice(0, 10)
   }
 
-  // ── Path 2: Revenue-threshold query — special handling ────────────────────
+  // ── Path 2: Revenue-threshold query ───────────────────────────────────────────
   if (isRevenue) {
     const revenueResults = await searchRevenueCompanies(rawQuery)
     return revenueResults.slice(0, 15)
   }
 
-  // ── Path 3: Discovery query — parallel company + news pass ────────────────
-  // Build targeted query for company page search
-  const companyPageQuery = rawQuery  // category:company mode handles context well
+  // ── Path 3: Discovery query — use intent graph for richer queries ─────────────
+  const companyPageQuery = buildCompanyQuery(intent)
+  const newsQuery = buildNewsQuery(intent)
+  const newsStartDate = getNewsDateRange(intent)
 
-  // Build news query — add funding/hiring context for better article targeting
-  const newsQuery = [
-    rawQuery,
-    hasFundingStage ? '' : '',  // funding stage is already in rawQuery if user typed it
-    'funding announcement 2024 2025',
-  ].filter(Boolean).join(' ')
+  // Determine if news pass should run:
+  // - Always for recently_funded implicit signal
+  // - Always for explicit funding stage or geo queries
+  const shouldRunNews = intent.implicitSignals.includes('recently_funded')
+    || intent.fundingStages.length > 0
+    || intent.expandedGeo.length > 0
+    || intent.signals.includes('recent-funding')
 
-  // Run both passes in parallel
   const [companyResults, newsResults] = await Promise.all([
     searchCompanyPages(companyPageQuery, 20),
-    hasFundingStage || hasGeo ? searchNewsForCompanies(newsQuery, 12) : Promise.resolve([]),
+    shouldRunNews ? searchNewsForCompanies(newsQuery, newsStartDate, 12) : Promise.resolve([]),
   ])
 
   // Merge: company pages take precedence, news results fill gaps
   const merged = deduplicateByDomain([...companyResults, ...newsResults])
 
-  // Re-score: company_page results get a boost, news_extracted results are ranked lower
+  // Re-score: company_page results get a boost
   const rescored = merged.map(r => ({
     ...r,
     score: r.source === 'company_page' ? r.score + 0.3 : r.score,
