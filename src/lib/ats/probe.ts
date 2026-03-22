@@ -1,4 +1,7 @@
 import type { ATSPlatform, ATSJobPosting, ATSResult } from '@/types'
+import { routeLogger } from '@/lib/logger'
+
+const log = routeLogger('ats')
 
 // ── Slug guessing ────────────────────────────────────────────────────────────
 
@@ -182,23 +185,32 @@ interface ProbeResult {
 }
 
 async function probeSingleATS(probe: ATSProbe, slug: string): Promise<ProbeResult | null> {
+  const start = Date.now()
   try {
     const res = await fetch(probe.buildUrl(slug), {
       signal: AbortSignal.timeout(3000),
       headers: { 'Accept': 'application/json' },
     })
-    if (!res.ok) return null
+    if (!res.ok) {
+      log.step(`${probe.ats}:miss`, { slug, status: res.status, ms: Date.now() - start })
+      return null
+    }
 
     const data = await res.json()
     const rawJobs = probe.extractJobs(data)
-    if (rawJobs.length === 0) return null
+    if (rawJobs.length === 0) {
+      log.step(`${probe.ats}:empty`, { slug, ms: Date.now() - start })
+      return null
+    }
 
     const jobs = rawJobs.slice(0, 50).map(raw =>
       normalizeJob(probe.ats, raw, probe.buildApplyUrl(slug, raw))
     )
 
+    log.step(`${probe.ats}:hit`, { slug, jobs: jobs.length, ms: Date.now() - start })
     return { ats: probe.ats, slug, jobs }
-  } catch {
+  } catch (err) {
+    log.step(`${probe.ats}:error`, { slug, error: err instanceof Error ? err.message : 'timeout', ms: Date.now() - start })
     return null
   }
 }
@@ -213,9 +225,10 @@ export async function probeCompanyATS(
 ): Promise<ATSResult | null> {
   if (!domain) return null
 
+  const start = Date.now()
   const slugCandidates = guessSlug(domain)
+  log.step('probe:start', { domain, slugs: slugCandidates, targetRoles })
 
-  // For each slug candidate, probe all 5 ATS in parallel
   for (const slug of slugCandidates) {
     const results = await Promise.allSettled(
       ATS_PROBES.map(probe => probeSingleATS(probe, slug))
@@ -225,6 +238,12 @@ export async function probeCompanyATS(
       if (r.status === 'fulfilled' && r.value) {
         const { ats, slug: foundSlug, jobs } = r.value
         const matched = matchRoles(jobs, targetRoles)
+        log.step('probe:found', {
+          domain, ats, slug: foundSlug,
+          totalJobs: jobs.length, matchedJobs: matched.length,
+          topMatched: matched.slice(0, 3).map(j => j.title),
+          ms: Date.now() - start,
+        })
         return {
           ats,
           slug: foundSlug,
@@ -237,5 +256,6 @@ export async function probeCompanyATS(
     }
   }
 
+  log.step('probe:none', { domain, ms: Date.now() - start })
   return null
 }

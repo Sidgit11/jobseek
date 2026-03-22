@@ -95,6 +95,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Query required' }, { status: 400 })
     }
 
+    const searchStart = Date.now()
     log.req({ query, userId: user.id })
 
     // Get user profile for context
@@ -113,11 +114,13 @@ export async function POST(request: NextRequest) {
     }
 
     // 1. Extract intent with Gemini
+    const intentStart = Date.now()
     const intent = await extractSearchIntent(query, userContext)
-    log.step('intent', {
+    log.step('1-intent', {
+      ms: Date.now() - intentStart,
       companyName: intent.companyName, confidence: intent.confidence,
       keywords: intent.keywords, sectors: intent.sectors,
-      implicitSignals: intent.implicitSignals,
+      implicitSignals: intent.implicitSignals, temporal: intent.temporal,
     })
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -125,14 +128,20 @@ export async function POST(request: NextRequest) {
     // Skip Exa entirely — go straight to Crunchbase + ATS
     // ═══════════════════════════════════════════════════════════════════════════
     if (intent.companyName && intent.confidence > 0.9) {
-      log.step('fast-path', { companyName: intent.companyName })
+      log.step('2-fast-path', { companyName: intent.companyName })
       const domain = guessDomain(intent.companyName)
 
       // Crunchbase + ATS in parallel
+      const enrichStart = Date.now()
       const [crunchbaseData, atsData] = await Promise.all([
         enrichCompany(domain),
         probeCompanyATS(domain, userContext.targetRoles),
       ])
+      log.step('3-enrich+ats', {
+        ms: Date.now() - enrichStart,
+        crunchbase: Object.keys(crunchbaseData ?? {}).length > 0,
+        ats: atsData ? { platform: atsData.ats, jobs: atsData.total_open_roles, matched: atsData.matched_roles.length } : null,
+      })
 
       const companyData: Partial<Company> = {
         name: intent.companyName,
@@ -198,7 +207,7 @@ export async function POST(request: NextRequest) {
         .insert({ user_id: user.id, raw_query: query, processed_intent: intent, result_count: 1 })
         .select('id').single()
 
-      log.res(200, { path: 'direct', companyName: intent.companyName, atsFound: !!atsData, queryId: savedQuery?.id })
+      log.res(200, { path: 'direct', companyName: intent.companyName, atsFound: !!atsData, totalMs: Date.now() - searchStart, queryId: savedQuery?.id })
       return NextResponse.json({
         results: [result],
         intent,
@@ -212,25 +221,28 @@ export async function POST(request: NextRequest) {
     // ═══════════════════════════════════════════════════════════════════════════
 
     // 2. Search with Exa
+    const exaStart = Date.now()
     let exaResults: CompanySearchResult[] = await searchCompanies(intent)
     let usingFallback = false
-    log.step('exa:search', { keywords: intent.keywords, results: exaResults.length })
+    log.step('2-exa', { ms: Date.now() - exaStart, keywords: intent.keywords, results: exaResults.length })
 
     if (exaResults.length === 0) {
-      log.warn('exa returned 0 results — trying Gemini fallback')
+      log.warn('2-exa:empty', { keywords: intent.keywords })
+      const fallbackStart = Date.now()
       const claudeResults = await generateFallbackCompanies(intent, userContext, query)
       if (claudeResults.length > 0) {
         exaResults = claudeResults
         usingFallback = true
-        log.step('gemini:fallback', { results: claudeResults.length })
+        log.step('2-fallback:gemini', { ms: Date.now() - fallbackStart, results: claudeResults.length })
       } else {
         exaResults = getDemoCompanies(intent.keywords, intent.industries)
         usingFallback = true
-        log.warn('using demo companies', { results: exaResults.length })
+        log.warn('2-fallback:demo', { results: exaResults.length })
       }
     }
 
     // 3. Enrich top 5 with Crunchbase
+    const cbStart = Date.now()
     const TOP_N_TO_ENRICH = 5
     const toEnrich = exaResults.slice(0, TOP_N_TO_ENRICH)
     const rest = exaResults.slice(TOP_N_TO_ENRICH)
@@ -256,8 +268,10 @@ export async function POST(request: NextRequest) {
     ])
 
     const enriched = [...enrichedTop, ...enrichedRest]
+    log.step('3-crunchbase', { ms: Date.now() - cbStart, enriched: TOP_N_TO_ENRICH, total: enriched.length })
 
     // 4. ATS probing for top 10 (parallel, free, no API key)
+    const atsStart = Date.now()
     const TOP_N_ATS = 10
     const atsMap = new Map<string, ATSResult>()
     const atsPromises = enriched.slice(0, TOP_N_ATS).map(async (result) => {
@@ -269,7 +283,12 @@ export async function POST(request: NextRequest) {
       } catch {}
     })
     await Promise.allSettled(atsPromises)
-    log.step('ats:probe', { probed: Math.min(enriched.length, TOP_N_ATS), found: atsMap.size })
+    log.step('4-ats', {
+      ms: Date.now() - atsStart,
+      probed: Math.min(enriched.length, TOP_N_ATS),
+      found: atsMap.size,
+      platforms: [...atsMap.values()].map(a => `${a.slug}@${a.ats}(${a.total_open_roles}jobs/${a.matched_roles.length}matched)`),
+    })
 
     // 5. Build company objects + scores
     const results: SearchResult[] = []
@@ -334,6 +353,11 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    log.step('5-scored', {
+      results: results.length,
+      topScores: results.slice(0, 5).map(r => ({ name: r.company.name, score: r.relevance_score, ats: !!r.ats })),
+    })
+
     // Sort by relevance
     results.sort((a, b) => b.relevance_score - a.relevance_score)
 
@@ -354,6 +378,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 6. Generate targeting briefs for top 5 (with ATS data)
+    const briefStart = Date.now()
     const TOP_N_BRIEFS = 5
     const briefResults = await Promise.allSettled(
       results.slice(0, TOP_N_BRIEFS).map(r =>
@@ -365,7 +390,7 @@ export async function POST(request: NextRequest) {
         results[i].brief = (briefResults[i] as PromiseFulfilledResult<typeof results[0]['brief']>).value
       }
     }
-    log.step('briefs', { count: briefResults.filter(b => b.status === 'fulfilled').length })
+    log.step('6-briefs', { ms: Date.now() - briefStart, count: briefResults.filter(b => b.status === 'fulfilled').length })
 
     // Save query
     const { data: savedQuery } = await supabase
@@ -374,7 +399,7 @@ export async function POST(request: NextRequest) {
       .select('id').single()
 
     const final = results.slice(0, 15)
-    log.res(200, { path: 'discovery', results: final.length, usingFallback, atsFound: atsMap.size, queryId: savedQuery?.id })
+    log.res(200, { path: 'discovery', results: final.length, usingFallback, atsFound: atsMap.size, totalMs: Date.now() - searchStart, queryId: savedQuery?.id })
     return NextResponse.json({
       results: final,
       intent,

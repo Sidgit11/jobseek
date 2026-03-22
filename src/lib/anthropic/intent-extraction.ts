@@ -1,6 +1,9 @@
 import { generateText } from '@/lib/google/client'
 import { z } from 'zod'
 import type { SearchIntent, CandidateContext } from '@/types'
+import { routeLogger } from '@/lib/logger'
+
+const log = routeLogger('intent')
 
 const SearchIntentSchema = z.object({
   industries: z.array(z.string()),
@@ -240,6 +243,9 @@ export async function extractSearchIntent(
   rawQuery: string,
   userContext: CandidateContext
 ): Promise<SearchIntent> {
+  const start = Date.now()
+  log.step('extract:start', { query: rawQuery, userRoles: userContext.targetRoles })
+
   // Try Gemini first; fall back to heuristic on ANY error
   try {
     const text = await generateText(
@@ -370,8 +376,20 @@ Query: "YC companies building developer tools"
       validated.roleSignal = normalizeRole(validated.roles)
     }
 
+    log.step('extract:gemini', {
+      ms: Date.now() - start,
+      companyName: validated.companyName, confidence: validated.confidence,
+      keywords: validated.keywords, sectors: validated.sectors,
+      implicitSignals: validated.implicitSignals,
+    })
     return validated
-  } catch {
-    return heuristicIntent(rawQuery, userContext)
+  } catch (err) {
+    log.warn('extract:fallback-to-heuristic', { query: rawQuery, error: err instanceof Error ? err.message : 'unknown', ms: Date.now() - start })
+    const fallback = heuristicIntent(rawQuery, userContext)
+    log.step('extract:heuristic', {
+      companyName: fallback.companyName, confidence: fallback.confidence,
+      keywords: fallback.keywords, implicitSignals: fallback.implicitSignals,
+    })
+    return fallback
   }
 }
