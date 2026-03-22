@@ -79,21 +79,64 @@ function inferImplicitSignals(
   return [...new Set(implicit)]
 }
 
-/** Detect if query is a direct company name lookup (1-3 words, no filter terms) */
-function isDirectNameQuery(rawQuery: string): boolean {
+// Role-like terms that when trailing a capitalized word indicate "Company + Role" pattern
+const ROLE_SUFFIXES = new Set([
+  'pm', 'pms', 'engineer', 'engineers', 'engineering', 'designer', 'designers',
+  'swe', 'sde', 'developer', 'developers', 'analyst', 'analysts',
+  'manager', 'managers', 'director', 'directors', 'lead', 'leads',
+  'sales', 'marketing', 'ops', 'operations', 'product', 'design',
+  'data', 'science', 'scientist', 'scientists', 'roles', 'jobs', 'positions',
+])
+
+const DISCOVERY_TERMS = new Set([
+  'hiring', 'startup', 'startups', 'series', 'seed', 'ai', 'ml',
+  'nyc', 'remote', 'companies', 'company',
+  'funded', 'funding', 'growth', 'saas', 'fintech', 'healthtech',
+  'devtools', 'crypto', 'b2b', 'b2c', 'enterprise', 'consumer', 'climate',
+  'india', 'us', 'usa', 'europe', 'uk', 'singapore', 'remote',
+])
+
+/**
+ * Detect if query contains a specific company name.
+ * Returns the extracted company name or null.
+ *
+ * Handles patterns:
+ * - "Microsoft" → "Microsoft"
+ * - "Microsoft PM" → "Microsoft" (strips role suffix)
+ * - "Microsoft PMs" → "Microsoft"
+ * - "Stripe engineering" → "Stripe"
+ * - "Series B startups" → null (discovery query)
+ */
+function extractCompanyNameFromQuery(rawQuery: string): string | null {
   const words = rawQuery.trim().split(/\s+/)
-  if (words.length === 0 || words.length > 3) return false
-  if (!/^[A-Z]/.test(words[0])) return false
-  const filterTerms = new Set([
-    'hiring', 'startup', 'startups', 'series', 'seed', 'ai', 'ml',
-    'nyc', 'remote', 'engineer', 'engineers', 'companies', 'company',
-    'funded', 'funding', 'growth', 'saas', 'fintech', 'healthtech',
-    'devtools', 'crypto', 'b2b', 'b2c', 'enterprise', 'consumer', 'climate',
-  ])
+  if (words.length === 0 || words.length > 4) return null
+  if (!/^[A-Z]/.test(words[0])) return null
+
+  // Check if any word is a discovery term → not a company lookup
   for (const w of words) {
-    if (filterTerms.has(w.toLowerCase())) return false
+    if (DISCOVERY_TERMS.has(w.toLowerCase())) return null
   }
-  return true
+
+  // Single word: it's a company name
+  if (words.length === 1) return words[0]
+
+  // Multi-word: check if trailing words are role terms
+  // "Microsoft PM" → company="Microsoft", role="PM"
+  // "Acme Corp" → company="Acme Corp" (no role suffix)
+  let companyWords = [...words]
+  while (companyWords.length > 1) {
+    const lastWord = companyWords[companyWords.length - 1]
+    if (ROLE_SUFFIXES.has(lastWord.toLowerCase())) {
+      companyWords = companyWords.slice(0, -1)
+    } else {
+      break
+    }
+  }
+
+  // If we stripped all words, something's wrong
+  if (companyWords.length === 0) return null
+
+  return companyWords.join(' ')
 }
 
 /** Expand geography string to list of cities/regions */
@@ -150,21 +193,29 @@ function normalizeRole(roles: string[]): string | null {
 function heuristicIntent(rawQuery: string, userContext: CandidateContext): SearchIntent {
   const q = rawQuery.toLowerCase()
 
-  // For direct company name queries
-  if (isDirectNameQuery(rawQuery)) {
+  // For direct company name queries (e.g. "Microsoft", "Microsoft PM", "Stripe engineering")
+  const detectedCompany = extractCompanyNameFromQuery(rawQuery)
+  if (detectedCompany) {
+    // Check if query also has a role suffix we can use
+    const queryLower = rawQuery.toLowerCase()
+    const roleFromQuery = [...ROLE_SUFFIXES].find(r => queryLower.includes(r))
+    const roles = roleFromQuery
+      ? [roleFromQuery.charAt(0).toUpperCase() + roleFromQuery.slice(1)]  // basic capitalize
+      : userContext.targetRoles
+
     return {
       industries: userContext.targetIndustries.length ? userContext.targetIndustries : [],
       fundingStages: [],
-      roles: userContext.targetRoles,
+      roles,
       geography: userContext.location,
       signals: [],
       companySize: 'any',
-      keywords: [rawQuery.trim()],
-      companyName: rawQuery.trim(),
+      keywords: [detectedCompany],
+      companyName: detectedCompany,
       confidence: 0.95,
       sectors: industriesToSectors(userContext.targetIndustries),
       expandedGeo: expandGeo(userContext.location),
-      roleSignal: normalizeRole(userContext.targetRoles),
+      roleSignal: normalizeRole(roles),
       temporal: null,
       implicitSignals: [],
     }

@@ -158,8 +158,41 @@ describe('intent extraction heuristic behavior', () => {
   })
 
   test('filter words prevent false company name detection', async () => {
-    // "AI" alone looks like a company name but is a filter term
     const intent = await extractSearchIntent('hiring startups', baseContext)
+    expect(intent.companyName).toBeNull()
+  })
+
+  // ── Company + Role pattern tests ────────────────────────────────────────────
+
+  test('"Microsoft PM" extracts companyName as "Microsoft" (strips role suffix)', async () => {
+    const intent = await extractSearchIntent('Microsoft PM', baseContext)
+    expect(intent.companyName).toBe('Microsoft')
+    expect(intent.confidence).toBeGreaterThanOrEqual(0.9)
+  })
+
+  test('"Microsoft PMs" extracts companyName as "Microsoft"', async () => {
+    const intent = await extractSearchIntent('Microsoft PMs', baseContext)
+    expect(intent.companyName).toBe('Microsoft')
+  })
+
+  test('"Stripe engineering" extracts companyName as "Stripe"', async () => {
+    const intent = await extractSearchIntent('Stripe engineering', baseContext)
+    expect(intent.companyName).toBe('Stripe')
+  })
+
+  test('"Google designer" extracts companyName as "Google"', async () => {
+    const intent = await extractSearchIntent('Google designer', baseContext)
+    expect(intent.companyName).toBe('Google')
+  })
+
+  test('"Razorpay" alone is detected as company', async () => {
+    const intent = await extractSearchIntent('Razorpay', baseContext)
+    expect(intent.companyName).toBe('Razorpay')
+    expect(intent.confidence).toBeGreaterThanOrEqual(0.9)
+  })
+
+  test('"Series B AI startups" is NOT detected as company', async () => {
+    const intent = await extractSearchIntent('Series B AI startups', baseContext)
     expect(intent.companyName).toBeNull()
   })
 })

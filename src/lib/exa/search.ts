@@ -96,8 +96,17 @@ const NEWS_MEDIA_DOMAINS = new Set([
   'economic times', 'moneycontrol', 'cnbc', 'reuters', 'ft',
 ])
 
-function isNewsDomain(domain: string): boolean {
-  return Array.from(NEWS_MEDIA_DOMAINS).some(d => domain.includes(d))
+// Domains that should never appear as company results
+const BLOCKED_DOMAINS = new Set([
+  'linkedin.com', 'facebook.com', 'twitter.com', 'x.com', 'instagram.com',
+  'youtube.com', 'reddit.com', 'medium.com', 'wikipedia.org', 'github.com',
+  'glassdoor.com', 'indeed.com', 'crunchbase.com', 'pitchbook.com',
+  'google.com', 'apple.com', 'amazon.com', // too generic, not useful as results
+  'wellfound.com', 'angellist.com', 'tracxn.com',
+])
+
+function isBlockedDomain(domain: string): boolean {
+  return BLOCKED_DOMAINS.has(domain) || Array.from(NEWS_MEDIA_DOMAINS).some(d => domain.includes(d))
 }
 
 /** Direct company lookups like "Stripe", "Razorpay" vs discovery queries */
@@ -217,7 +226,7 @@ async function searchCompanyPages(query: string, numResults = 20): Promise<Compa
     let url: URL
     try { url = new URL(r.url) } catch { continue }
     const domain = getApexDomain(url.hostname)
-    if (isNewsDomain(domain)) continue
+    if (isBlockedDomain(domain)) continue
 
     results.push({
       name: cleanCompanyName(r.title, domain),
@@ -343,7 +352,7 @@ export async function searchCompanies(intent: SearchIntent): Promise<CompanySear
           score: 1.0,
           source: 'direct_lookup',
         })
-      } else if (!isNewsDomain(domain)) {
+      } else if (!isBlockedDomain(domain)) {
         results.push({
           name,
           domain,
