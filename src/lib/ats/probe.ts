@@ -3,6 +3,21 @@ import { routeLogger } from '@/lib/logger'
 
 const log = routeLogger('ats')
 
+// ── Domain blocklist — skip ATS probing for social/platform domains ─────────
+const ATS_BLOCKED_DOMAINS = new Set([
+  'linkedin.com', 'google.com', 'facebook.com', 'meta.com',
+  'twitter.com', 'x.com', 'github.com', 'youtube.com',
+  'reddit.com', 'wikipedia.org', 'medium.com',
+  'glassdoor.com', 'indeed.com', 'wellfound.com',
+])
+
+// ── Garbage title filter ────────────────────────────────────────────────────
+const GARBAGE_TITLE_PATTERN = /^(test|bug\s*bash|demo|sample|example|123|xxx|asdf|untitled|copy\s+\d|null|undefined|tricky\s+job)/i
+
+function isGarbageTitle(title: string): boolean {
+  return GARBAGE_TITLE_PATTERN.test(title.trim()) || title.trim().length < 3
+}
+
 // ── Slug guessing ────────────────────────────────────────────────────────────
 
 /** Generate slug candidates from a company domain */
@@ -203,11 +218,16 @@ async function probeSingleATS(probe: ATSProbe, slug: string): Promise<ProbeResul
       return null
     }
 
-    const jobs = rawJobs.slice(0, 50).map(raw =>
-      normalizeJob(probe.ats, raw, probe.buildApplyUrl(slug, raw))
-    )
+    const jobs = rawJobs.slice(0, 50)
+      .map(raw => normalizeJob(probe.ats, raw, probe.buildApplyUrl(slug, raw)))
+      .filter(job => !isGarbageTitle(job.title))
 
-    log.step(`${probe.ats}:hit`, { slug, jobs: jobs.length, ms: Date.now() - start })
+    if (jobs.length === 0) {
+      log.step(`${probe.ats}:all-garbage`, { slug, rawCount: rawJobs.length, ms: Date.now() - start })
+      return null
+    }
+
+    log.step(`${probe.ats}:hit`, { slug, jobs: jobs.length, filtered: rawJobs.length - jobs.length, ms: Date.now() - start })
     return { ats: probe.ats, slug, jobs }
   } catch (err) {
     log.step(`${probe.ats}:error`, { slug, error: err instanceof Error ? err.message : 'timeout', ms: Date.now() - start })
@@ -224,6 +244,13 @@ export async function probeCompanyATS(
   targetRoles: string[]
 ): Promise<ATSResult | null> {
   if (!domain) return null
+
+  // Block social/platform domains from ATS probing
+  const cleanDomain = domain.replace(/^www\./, '')
+  if (ATS_BLOCKED_DOMAINS.has(cleanDomain)) {
+    log.step('probe:blocked-domain', { domain })
+    return null
+  }
 
   const start = Date.now()
   const slugCandidates = guessSlug(domain)

@@ -112,24 +112,42 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
+function isWhyNowWeak(signals: string[]): boolean {
+  const weakPatterns = ['worth exploring', 'worth a closer look', 'limited public data']
+  return signals.length <= 1 && signals.some(s =>
+    weakPatterns.some(p => s.toLowerCase().includes(p))
+  )
+}
+
 function BriefSection({ brief }: { brief: TargetingBrief }) {
+  const weakWhyNow = isWhyNowWeak(brief.whyNow)
+
   return (
     <div className="mt-3 space-y-2.5" onClick={e => e.stopPropagation()}>
       {/* WHY NOW */}
-      <div className="rounded-xl p-3" style={{ background: 'rgba(163,230,53,0.06)', border: '1px solid rgba(163,230,53,0.15)' }}>
-        <div className="flex items-center gap-1.5 mb-1.5">
-          <Zap size={12} style={{ color: 'var(--color-lime)' }} />
-          <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-lime-text)' }}>Why Now</span>
+      {weakWhyNow ? (
+        <div className="flex items-center gap-1.5 mt-2">
+          <Zap size={11} style={{ color: 'var(--color-text-tertiary)' }} />
+          <span className="text-[10px] font-medium" style={{ color: 'var(--color-text-tertiary)' }}>
+            {brief.whyNow[0] || 'Limited public data'}
+          </span>
         </div>
-        <ul className="space-y-1">
-          {brief.whyNow.map((signal, i) => (
-            <li key={i} className="flex items-start gap-1.5 text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-              <span className="mt-1 flex-shrink-0 h-1 w-1 rounded-full" style={{ background: 'var(--color-lime)' }} />
-              {signal}
-            </li>
-          ))}
-        </ul>
-      </div>
+      ) : (
+        <div className="rounded-xl p-3" style={{ background: 'rgba(163,230,53,0.06)', border: '1px solid rgba(163,230,53,0.15)' }}>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <Zap size={12} style={{ color: 'var(--color-lime)' }} />
+            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-lime-text)' }}>Why Now</span>
+          </div>
+          <ul className="space-y-1">
+            {brief.whyNow.map((signal, i) => (
+              <li key={i} className="flex items-start gap-1.5 text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                <span className="mt-1 flex-shrink-0 h-1 w-1 rounded-full" style={{ background: 'var(--color-lime)' }} />
+                {signal}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* YOUR ANGLE */}
       <div className="rounded-xl p-3" style={{ background: 'rgba(14,165,233,0.05)', border: '1px solid rgba(14,165,233,0.12)' }}>

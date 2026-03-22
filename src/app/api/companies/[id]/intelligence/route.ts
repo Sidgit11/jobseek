@@ -78,7 +78,7 @@ export async function GET(
       // Fetch user context
       const { data: profile } = await supabase
         .from('profiles')
-        .select('target_roles, target_industries, location, candidate_summary, name')
+        .select('target_roles, target_industries, location, candidate_summary, name, seniority, company_stages, target_locations, linkedin_experience, linkedin_headline')
         .eq('id', user.id)
         .single()
 
@@ -88,6 +88,11 @@ export async function GET(
         targetRoles: profile?.target_roles ?? [],
         targetIndustries: profile?.target_industries ?? [],
         location: profile?.location ?? null,
+        seniority: profile?.seniority ?? null,
+        companyStages: profile?.company_stages ?? [],
+        targetLocations: profile?.target_locations ?? [],
+        linkedinExperience: profile?.linkedin_experience ?? null,
+        linkedinHeadline: profile?.linkedin_headline ?? null,
       }
 
       // Fetch news and generate summary in parallel

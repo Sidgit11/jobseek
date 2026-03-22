@@ -61,6 +61,11 @@ export async function POST(request: NextRequest) {
       targetRoles: profile?.target_roles ?? [],
       targetIndustries: profile?.target_industries ?? [],
       location: profile?.location ?? null,
+      seniority: profile?.seniority ?? null,
+      companyStages: profile?.company_stages ?? [],
+      targetLocations: profile?.target_locations ?? [],
+      linkedinExperience: profile?.linkedin_experience ?? null,
+      linkedinHeadline: profile?.linkedin_headline ?? null,
     }
 
     log.step('db:fetched', { person: person.name, company: company.name })

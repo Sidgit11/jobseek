@@ -197,6 +197,12 @@ export interface CandidateContext {
   targetRoles: string[]
   targetIndustries: string[]
   location: string | null
+  // Richer context for personalized briefs
+  seniority: string | null
+  companyStages: string[]
+  targetLocations: string[]
+  linkedinExperience: Array<{ company: string; title: string; duration: string }> | null
+  linkedinHeadline: string | null
 }
 
 // ── API REQUEST / RESPONSE TYPES ─────────────────────────────────────────────

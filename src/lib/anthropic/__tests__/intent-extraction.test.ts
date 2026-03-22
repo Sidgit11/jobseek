@@ -36,6 +36,11 @@ describe('intent extraction heuristic behavior', () => {
     targetRoles: ['Product Manager'],
     targetIndustries: ['AI / ML', 'SaaS'],
     location: 'India',
+    seniority: 'senior' as const,
+    companyStages: ['Series A', 'Series B'],
+    targetLocations: ['India', 'Remote'],
+    linkedinExperience: [{ company: 'Flipkart', title: 'Product Lead', duration: '2 yrs' }],
+    linkedinHeadline: 'Product & GTM Leader',
   }
 
   test('direct company name query sets companyName and high confidence', async () => {
