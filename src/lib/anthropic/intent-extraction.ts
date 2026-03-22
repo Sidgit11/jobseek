@@ -427,6 +427,24 @@ Query: "YC companies building developer tools"
       validated.roleSignal = normalizeRole(validated.roles)
     }
 
+    // Post-process: SAFETY NET — if Gemini missed company name but heuristic would catch it, override
+    if (!validated.companyName || validated.confidence < 0.7) {
+      const heuristicCompany = extractCompanyNameFromQuery(rawQuery)
+      if (heuristicCompany) {
+        log.step('extract:company-override', {
+          geminiCompanyName: validated.companyName,
+          geminiConfidence: validated.confidence,
+          heuristicCompanyName: heuristicCompany,
+        })
+        validated.companyName = heuristicCompany
+        validated.confidence = Math.max(validated.confidence, 0.95)
+        // Also ensure keywords include the company name
+        if (!validated.keywords.some(k => k.toLowerCase() === heuristicCompany.toLowerCase())) {
+          validated.keywords.unshift(heuristicCompany)
+        }
+      }
+    }
+
     log.step('extract:gemini', {
       ms: Date.now() - start,
       companyName: validated.companyName, confidence: validated.confidence,
