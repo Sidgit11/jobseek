@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Search, Kanban, User, LogOut, Radio, LayoutDashboard, Zap } from 'lucide-react'
+import { Search, Kanban, User, LogOut, Radio, LayoutDashboard, Zap, MessageSquare } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import type { Profile } from '@/types'
@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/discover', icon: Search, label: 'Discover' },
   { href: '/signals', icon: Radio, label: 'Signals' },
+  { href: '/engage', icon: MessageSquare, label: 'Engage' },
   { href: '/pipeline', icon: Kanban, label: 'Pipeline' },
   { href: '/profile', icon: User, label: 'Profile' },
 ]

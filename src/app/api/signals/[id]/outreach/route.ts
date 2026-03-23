@@ -137,11 +137,31 @@ export async function POST(
 
     const signal = signalData as Signal
 
+    // Fetch candidate model for richer personalization
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('device_token', token)
+      .single()
+
+    let candidateContext = ''
+    if (profile?.id) {
+      const { data: candidateModel } = await supabase
+        .from('candidate_models')
+        .select('positioning, bio_short, domain_expertise, unique_pov, skill_tags')
+        .eq('user_id', profile.id)
+        .single()
+
+      if (candidateModel) {
+        candidateContext = `\n\nCandidate intelligence (use to personalize the message):\n${JSON.stringify(candidateModel, null, 2)}`
+      }
+    }
+
     console.log(`[signals/${id}/outreach] Generating outreach for "${signal.author}" (${signal.type})`)
 
     const rawText = await generateText(
       SYSTEM_PROMPT,
-      buildUserPrompt(signal),
+      buildUserPrompt(signal) + candidateContext,
       { temperature: 0.7, maxTokens: 1500 }
     )
 

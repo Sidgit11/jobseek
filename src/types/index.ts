@@ -1,3 +1,14 @@
+// ── CAREER INTELLIGENCE (re-exports) ──────────────────────────────────────────
+export type {
+  WorkExperience,
+  Project,
+  CandidateModel,
+  IntakeMessage,
+  EngagementOpportunity,
+  EngagementPostInput,
+  ScoredEngagement,
+} from '@/career-intelligence/types'
+
 // ── ENUMS ──────────────────────────────────────────────────────────────────────
 
 export type PipelineStatus = 'saved' | 'messaged' | 'replied' | 'interviewing'
@@ -65,6 +76,11 @@ export interface Profile {
   onboarding_completed: boolean
   device_token: string | null
   email_credits: number
+  slug: string | null
+  is_profile_public: boolean
+  twitter_url: string | null
+  github_url: string | null
+  website_url: string | null
   created_at: string
   updated_at: string
 }
