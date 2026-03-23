@@ -98,12 +98,26 @@ const NEWS_MEDIA_DOMAINS = new Set([
 
 // Domains that should never appear as company results
 const BLOCKED_DOMAINS = new Set([
+  // Social / content platforms
   'linkedin.com', 'facebook.com', 'twitter.com', 'x.com', 'instagram.com',
   'youtube.com', 'reddit.com', 'medium.com', 'wikipedia.org', 'github.com',
+  // Job boards & data aggregators
   'glassdoor.com', 'indeed.com', 'crunchbase.com', 'pitchbook.com',
-  'google.com', 'apple.com', 'amazon.com', // too generic, not useful as results
   'wellfound.com', 'angellist.com', 'tracxn.com',
+  'levels.fyi', 'teamblind.com', 'comparably.com',
+  // Too generic
+  'google.com', 'apple.com', 'amazon.com',
+  // Recruiting / hiring / job platforms
+  'hired.com', 'toptal.com', 'triplebyte.com', 'turing.com',
+  'upwork.com', 'fiverr.com', 'gun.io', 'remoteok.com',
+  'weworkremotely.com', 'builtin.com', 'dice.com',
+  'ziprecruiter.com', 'monster.com', 'careerbuilder.com',
+  // ATS platforms (we probe these separately, don't want them as results)
+  'lever.co', 'greenhouse.io', 'ashbyhq.com', 'workable.com', 'recruitee.com',
 ])
+
+// Patterns that indicate a company is a recruiting/staffing/talent platform
+export const RECRUITING_PATTERNS = /\b(recruiting|staffing|talent acquisition|job board|hiring platform|recruitment agency|headhunting|career platform|talent sourcing|applicant tracking|HR tech|HR SaaS|human resources software|recruiting software|talent management|candidate sourcing)\b/i
 
 function isBlockedDomain(domain: string): boolean {
   return BLOCKED_DOMAINS.has(domain) || Array.from(NEWS_MEDIA_DOMAINS).some(d => domain.includes(d))
@@ -142,11 +156,32 @@ function deduplicateByDomain(results: CompanySearchResult[]): CompanySearchResul
   return Array.from(seen.values())
 }
 
+// Words that describe user intent, not company characteristics.
+// These pollute the Exa query and cause it to return companies ABOUT hiring/recruiting
+// instead of companies that ARE hiring.
+const QUERY_NOISE_WORDS = new Set([
+  // Action words (what the user wants, not what the company is)
+  'hiring', 'looking', 'seeking', 'searching', 'jobs', 'roles', 'openings',
+  'positions', 'team', 'work', 'join', 'apply',
+  // Role words (handled separately via roleSignal — don't leak into Exa query)
+  'engineer', 'engineers', 'engineering', 'pm', 'pms', 'designer', 'designers',
+  'developer', 'developers', 'manager', 'managers', 'analyst', 'analysts',
+  'marketer', 'marketers', 'marketing',
+  // Meta words (Exa category:company already filters for companies)
+  'startups', 'startup', 'companies', 'company', 'firms', 'firm',
+  'product',
+])
+
 /**
  * Build a rich query string from intent fields for company page search.
+ * CRITICAL: Strip user-intent words (hiring, engineers, startups) that cause
+ * Exa to return recruiting platforms instead of actual companies.
  */
-function buildCompanyQuery(intent: SearchIntent): string {
-  const parts: string[] = [...intent.keywords]
+export function buildCompanyQuery(intent: SearchIntent): string {
+  // Start with keywords but strip noise words
+  const parts: string[] = intent.keywords.filter(k =>
+    !QUERY_NOISE_WORDS.has(k.toLowerCase())
+  )
 
   // Add top sectors if not already in keywords
   for (const sector of intent.sectors.slice(0, 2)) {
@@ -162,12 +197,17 @@ function buildCompanyQuery(intent: SearchIntent): string {
     }
   }
 
-  // Add role context for hiring queries
-  if (intent.roleSignal && intent.temporal === 'active_hiring') {
-    const roleReadable = intent.roleSignal.replace(/_/g, ' ')
-    if (!parts.some(p => p.toLowerCase().includes(roleReadable))) {
-      parts.push(`hiring ${roleReadable}`)
+  // Add funding stage if present (this IS a company attribute)
+  for (const stage of intent.fundingStages) {
+    const readable = stage.replace(/-/g, ' ')
+    if (!parts.some(p => p.toLowerCase().includes(readable))) {
+      parts.push(readable)
     }
+  }
+
+  // If we stripped everything meaningful, add "technology company" as a base
+  if (parts.length === 0) {
+    parts.push('technology company')
   }
 
   return parts.join(' ')
@@ -177,7 +217,17 @@ function buildCompanyQuery(intent: SearchIntent): string {
  * Build a news query string enhanced by implicit signals.
  */
 function buildNewsQuery(intent: SearchIntent): string {
-  const parts: string[] = [...intent.keywords]
+  // Strip noise words from keywords for news query too
+  const parts: string[] = intent.keywords.filter(k =>
+    !QUERY_NOISE_WORDS.has(k.toLowerCase())
+  )
+
+  // Add sectors for news context
+  for (const sector of intent.sectors.slice(0, 2)) {
+    if (!parts.some(p => p.toLowerCase().includes(sector))) {
+      parts.push(sector)
+    }
+  }
 
   if (intent.implicitSignals.includes('recently_funded')) {
     parts.push('raised funding round 2025 2026')

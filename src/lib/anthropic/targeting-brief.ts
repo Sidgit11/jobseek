@@ -5,6 +5,7 @@ import type { Company, SearchIntent, CandidateContext, TargetingBrief, ATSResult
 
 function buildDataDrivenFallback(
   company: Company,
+  intent: SearchIntent,
   userContext: CandidateContext,
   atsData?: ATSResult | null,
 ): TargetingBrief {
@@ -20,12 +21,31 @@ function buildDataDrivenFallback(
     whyNow.push(`${company.funding_stage} company — raised ${company.total_funding} total`)
   }
 
+  // Priority 1: Role matching the SEARCH QUERY (what user searched for)
+  if (intent.roleSignal && atsData) {
+    const searchRole = intent.roleSignal.replace(/_/g, ' ').toLowerCase()
+    const searchRoleMatch = atsData.open_roles.find(r =>
+      r.title.toLowerCase().includes(searchRole)
+    )
+    if (searchRoleMatch) {
+      const daysAgo = searchRoleMatch.posted_date
+        ? Math.floor((Date.now() - new Date(searchRoleMatch.posted_date).getTime()) / (1000 * 60 * 60 * 24))
+        : null
+      whyNow.push(`Hiring "${searchRoleMatch.title}"${daysAgo !== null && daysAgo < 60 ? ` (posted ${daysAgo}d ago)` : ''} on ${atsData.ats}`)
+    }
+  }
+
+  // Priority 2: Role matching USER PROFILE target roles
   if (atsData && atsData.matched_roles.length > 0) {
-    const topRole = atsData.matched_roles[0]
-    const daysAgo = topRole.posted_date
-      ? Math.floor((Date.now() - new Date(topRole.posted_date).getTime()) / (1000 * 60 * 60 * 24))
-      : null
-    whyNow.push(`Hiring "${topRole.title}"${daysAgo !== null && daysAgo < 60 ? ` (posted ${daysAgo}d ago)` : ''} on ${atsData.ats}`)
+    // Don't duplicate if we already added a search-role match
+    const alreadyHasRoleSignal = whyNow.some(w => w.includes('Hiring "'))
+    if (!alreadyHasRoleSignal) {
+      const topRole = atsData.matched_roles[0]
+      const daysAgo = topRole.posted_date
+        ? Math.floor((Date.now() - new Date(topRole.posted_date).getTime()) / (1000 * 60 * 60 * 24))
+        : null
+      whyNow.push(`Hiring "${topRole.title}"${daysAgo !== null && daysAgo < 60 ? ` (posted ${daysAgo}d ago)` : ''} on ${atsData.ats}`)
+    }
   } else if (atsData && atsData.total_open_roles > 0) {
     whyNow.push(`${atsData.total_open_roles} open role${atsData.total_open_roles !== 1 ? 's' : ''} on their ${atsData.ats} board`)
   }
@@ -38,29 +58,35 @@ function buildDataDrivenFallback(
     whyNow.push('Limited public data — worth a closer look if the mission resonates')
   }
 
-  // YOUR ANGLE: cross-reference experience
+  // YOUR ANGLE: cascade through personalization strategies
   let yourAngle = ''
+  const companyDesc = (company.description ?? '').toLowerCase()
 
-  // Try to find industry/company overlap from linkedin experience
-  if (userContext.linkedinExperience && userContext.linkedinExperience.length > 0) {
-    const companyDesc = (company.description ?? '').toLowerCase()
+  // 1. Industry overlap from user profile
+  if (!yourAngle && userContext.targetIndustries.length > 0) {
+    for (const ind of userContext.targetIndustries) {
+      const terms = ind.toLowerCase().split(/\s*[\/,]\s*/)
+      if (terms.some(t => t.length > 2 && companyDesc.includes(t))) {
+        yourAngle = `Your experience in ${ind} directly maps to ${company.name}'s domain.`
+        break
+      }
+    }
+  }
 
+  // 2. LinkedIn experience company/domain overlap
+  if (!yourAngle && userContext.linkedinExperience && userContext.linkedinExperience.length > 0) {
     for (const exp of userContext.linkedinExperience) {
       const expCompanyLower = exp.company.toLowerCase()
-
-      // Check if past company name or role overlaps with target company's description
-      const descWords = companyDesc.split(/\s+/)
-      const hasOverlap = descWords.some(word =>
+      if (companyDesc.includes(expCompanyLower) || companyDesc.split(/\s+/).some(word =>
         word.length > 4 && expCompanyLower.includes(word)
-      ) || companyDesc.includes(expCompanyLower)
-
-      if (hasOverlap) {
+      )) {
         yourAngle = `Your experience as ${exp.title} at ${exp.company} maps directly to ${company.name}'s domain.`
         break
       }
     }
   }
 
+  // 3. Seniority + stage match
   if (!yourAngle && userContext.seniority && company.funding_stage) {
     const seniorityLabel = userContext.seniority === 'executive' ? 'executive-level'
       : userContext.seniority === 'management' ? 'management-level'
@@ -68,11 +94,15 @@ function buildDataDrivenFallback(
       : userContext.seniority === 'senior' ? 'senior'
       : ''
     if (seniorityLabel) {
-      yourAngle = `As a ${seniorityLabel} ${userContext.targetRoles[0] ?? 'professional'}, you'd bring experience to a ${company.funding_stage} company building its leadership bench.`
+      if (company.headcount && company.headcount < 100) {
+        yourAngle = `As a ${seniorityLabel} ${userContext.targetRoles[0] ?? 'professional'}, you'd be joining a ${company.headcount}-person team at a critical growth stage.`
+      } else {
+        yourAngle = `As a ${seniorityLabel} ${userContext.targetRoles[0] ?? 'professional'}, you'd bring experience to a ${company.funding_stage} company building its leadership bench.`
+      }
     }
   }
 
-  // Check stage preference fit
+  // 4. Stage preference fit
   if (!yourAngle && userContext.companyStages.length > 0 && company.funding_stage) {
     const stageMatch = userContext.companyStages.some(s =>
       company.funding_stage?.toLowerCase().includes(s.toLowerCase().replace('stage', '').trim())
@@ -82,17 +112,47 @@ function buildDataDrivenFallback(
     }
   }
 
+  // 5. Location match
+  if (!yourAngle && userContext.targetLocations.length > 0) {
+    const locMatch = userContext.targetLocations.find(loc => companyDesc.includes(loc.toLowerCase()))
+    if (locMatch) {
+      yourAngle = `${company.name} is based in ${locMatch}, matching your location preference. Your ${userContext.targetRoles[0] ?? 'professional'} background could be a strong fit.`
+    }
+  }
+
+  // 6. Generic fallback with LinkedIn headline if available
   if (!yourAngle) {
-    yourAngle = `Your ${userContext.targetRoles[0] ?? 'professional'} background could add value as ${company.name} scales.`
+    if (userContext.linkedinHeadline) {
+      yourAngle = `Your background as "${userContext.linkedinHeadline}" could add value as ${company.name} scales.`
+    } else {
+      yourAngle = `Your ${userContext.targetRoles[0] ?? 'professional'} background could add value as ${company.name} scales.`
+    }
   }
 
   // OPENING LINE: reference most specific data point
   let openingLine = ''
-  if (atsData?.matched_roles.length) {
+
+  // Best: reference a search-role matched ATS role
+  if (intent.roleSignal && atsData) {
+    const searchRole = intent.roleSignal.replace(/_/g, ' ').toLowerCase()
+    const match = atsData.open_roles.find(r => r.title.toLowerCase().includes(searchRole))
+    if (match) {
+      openingLine = `Noticed ${company.name} is looking for a ${match.title} — would love to discuss how my background fits.`
+    }
+  }
+
+  // Next: reference a profile-matched ATS role
+  if (!openingLine && atsData?.matched_roles.length) {
     openingLine = `Noticed ${company.name} is looking for a ${atsData.matched_roles[0].title} — would love to discuss how my background fits.`
-  } else if (company.last_round_date && company.funding_stage) {
+  }
+
+  // Next: reference funding
+  if (!openingLine && company.last_round_date && company.funding_stage) {
     openingLine = `Congrats on the ${company.funding_stage} round — would love to chat about how I could contribute as ${company.name} grows.`
-  } else {
+  }
+
+  // Last resort
+  if (!openingLine) {
     openingLine = `${company.name} caught my eye — would love to learn more about where the team is headed.`
   }
 
@@ -171,6 +231,7 @@ ${experienceContext}
 
 SEARCH CONTEXT:
 Query sectors: ${intent.sectors.join(', ')}
+${intent.roleSignal ? `Search role: ${intent.roleSignal.replace(/_/g, ' ')} (the user is specifically looking for this role)` : ''}
 ${implicitContext}
 Temporal: ${intent.temporal ?? 'any'}
 ${atsContext}
@@ -189,7 +250,8 @@ STRICT RULES:
 - yourAngle: Cross-reference the seeker's PAST EXPERIENCE with this company. If the seeker worked at a SaaS company and this is SaaS, SAY THAT. If the seeker worked at a similar-stage company, mention it. If seniority is senior+ and company is early-stage, highlight the leadership opportunity. Be SPECIFIC — reference actual company names from their experience.
 - openingLine: Reference the MOST SPECIFIC data point available. Prefer: specific ATS role title > funding event with amount > company product detail. NEVER use "impressed by what you're building" — be concrete.
 - If seeker's preferred company stages match this company's stage, mention the fit.
-- If there are matched ATS roles, reference them by title in all three sections.`,
+- If there are matched ATS roles, reference them by title in all three sections.
+- If a "Search role" is specified above, prioritize ATS roles matching THAT role over the seeker's profile roles in the whyNow section.`,
     { temperature: 0.6, maxTokens: 800 }
   )
 
@@ -202,6 +264,6 @@ STRICT RULES:
       openingLine: parsed.openingLine || '',
     }
   } catch {
-    return buildDataDrivenFallback(company, userContext, atsData)
+    return buildDataDrivenFallback(company, intent, userContext, atsData)
   }
 }

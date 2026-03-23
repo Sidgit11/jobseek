@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { extractSearchIntent } from '@/lib/anthropic/intent-extraction'
-import { searchCompanies } from '@/lib/exa/search'
+import { searchCompanies, RECRUITING_PATTERNS } from '@/lib/exa/search'
 import { enrichCompany } from '@/lib/crunchbase/enrich'
 import { generateFallbackCompanies } from '@/lib/anthropic/company-discovery'
 import { getDemoCompanies } from '@/lib/demo/companies'
@@ -22,10 +22,19 @@ function scoreRelevance(
   intent: SearchIntent,
   snippet: string,
   rawQuery?: string,
+  atsData?: ATSResult | null,
 ): number {
   let score = 30 // base
 
   const text = (snippet + ' ' + (company.description ?? '')).toLowerCase()
+
+  // ── Recruiting platform penalty ───────────────────────────────────────────────
+  // If this company IS a recruiting/staffing platform and the user didn't search
+  // for recruiting companies, heavily penalize it
+  const queryMentionsRecruiting = rawQuery && /\b(recruit|staffing|talent|hr\b|human resources)/i.test(rawQuery)
+  if (RECRUITING_PATTERNS.test(text) && !queryMentionsRecruiting) {
+    score -= 30
+  }
 
   // Name match (strongest relevance signal)
   if (rawQuery) {
@@ -61,7 +70,17 @@ function scoreRelevance(
     if (months < 6) score += 8
   }
 
-  return Math.min(score, 100)
+  // ── Search-role ATS match bonus ───────────────────────────────────────────────
+  // If user searched "hiring engineers" and this company has open Engineer roles → boost
+  if (intent.roleSignal && atsData) {
+    const searchRole = intent.roleSignal.replace(/_/g, ' ').toLowerCase()
+    const hasSearchRoleMatch = atsData.open_roles.some(r =>
+      r.title.toLowerCase().includes(searchRole)
+    )
+    if (hasSearchRoleMatch) score += 15
+  }
+
+  return Math.min(Math.max(score, 0), 100)
 }
 
 // ── FIT SCORE: How well does this company match the USER PROFILE? ────────────
@@ -94,7 +113,7 @@ function scoreFit(
       const terms = ind.toLowerCase().split(/\s*[\/,]\s*/)
       return terms.some(t => t.length > 2 && text.includes(t))
     }).length
-    score += Math.min(industryMatches * 8, 15)
+    score += Math.min(industryMatches * 10, 20)
   }
 
   // ── Company stage preference match ────────────────────────────────────────────
@@ -257,7 +276,7 @@ export async function POST(request: NextRequest) {
         ...crunchbaseData,
       }
 
-      const relevanceScore = scoreRelevance(resolvedCompany, intent, '', query)
+      const relevanceScore = scoreRelevance(resolvedCompany, intent, '', query, atsData)
       const fitScore = scoreFit(resolvedCompany, userContext, '', atsData)
 
       // Generate targeting brief
@@ -420,7 +439,7 @@ export async function POST(request: NextRequest) {
       if (upsertError) log.warn(`DB upsert failed for ${r.domain}`, upsertError.message)
 
       const atsData = atsMap.get(r.domain) ?? null
-      const relevance = scoreRelevance(resolvedCompany, intent, r.snippet, query)
+      const relevance = scoreRelevance(resolvedCompany, intent, r.snippet, query, atsData)
       const fit = scoreFit(resolvedCompany, userContext, r.snippet, atsData)
 
       results.push({
