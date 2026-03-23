@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, Suspense, useMemo } from 'react'
+import { useState, useRef, useEffect, Suspense, useMemo, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Search, Sparkles, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -9,6 +9,31 @@ import { CompanyPanel } from '@/components/intelligence/CompanyPanel'
 import { CompanyCardSkeleton } from '@/components/shared/LoadingSkeleton'
 import { SearchLoader } from '@/components/discovery/SearchLoader'
 import type { SearchResult } from '@/types'
+
+// ── Session storage persistence ─────────────────────────────────────────────
+const STORAGE_KEY = 'jobseek_discover_state'
+
+interface PersistedState {
+  query: string
+  results: SearchResult[]
+  hasSearched: boolean
+  demoMode: boolean
+  sortMode: string
+}
+
+function loadPersistedState(): PersistedState | null {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY)
+    if (!raw) return null
+    return JSON.parse(raw)
+  } catch { return null }
+}
+
+function savePersistedState(state: PersistedState) {
+  try {
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  } catch {}
+}
 
 const SUGGESTED_QUERIES = [
   'Series B AI startups hiring PMs in NYC',
@@ -41,17 +66,29 @@ function parseFundingToNumber(funding: string | null): number {
 function DiscoverPageInner() {
   const searchParams = useSearchParams()
   const initialQuery = searchParams.get('company') || searchParams.get('query') || ''
-  const [query, setQuery] = useState(initialQuery)
-  const [results, setResults] = useState<SearchResult[]>([])
+
+  // Restore from sessionStorage on mount
+  const persisted = useRef(loadPersistedState())
+  const [query, setQuery] = useState(initialQuery || persisted.current?.query || '')
+  const [results, setResults] = useState<SearchResult[]>(persisted.current?.results ?? [])
   const [searching, setSearching] = useState(false)
-  const [hasSearched, setHasSearched] = useState(false)
+  const [hasSearched, setHasSearched] = useState(persisted.current?.hasSearched ?? false)
   const [selectedResult, setSelectedResult] = useState<SearchResult | null>(null)
   const [savedCompanies, setSavedCompanies] = useState<Set<string>>(new Set())
-  const [demoMode, setDemoMode] = useState(false)
-  const [sortMode, setSortMode] = useState<SortMode>('fit')
+  const [demoMode, setDemoMode] = useState(persisted.current?.demoMode ?? false)
+  const [sortMode, setSortMode] = useState<SortMode>((persisted.current?.sortMode as SortMode) ?? 'fit')
   const [findPeopleOnOpen, setFindPeopleOnOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const hasAutoSearched = useRef(false)
+
+  // Persist state to sessionStorage whenever results/query change
+  const persistState = useCallback(() => {
+    savePersistedState({ query, results, hasSearched, demoMode, sortMode })
+  }, [query, results, hasSearched, demoMode, sortMode])
+
+  useEffect(() => {
+    persistState()
+  }, [persistState])
 
   // Auto-search when arriving with URL params (?company=Microsoft or ?query=...)
   useEffect(() => {
