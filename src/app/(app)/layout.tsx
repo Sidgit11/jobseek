@@ -11,11 +11,26 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     redirect('/login')
   }
 
-  const { data: profile } = await supabase
+  // Check / create profile — handles first-time sign-in
+  let { data: profile } = await supabase
     .from('profiles')
     .select('*')
     .eq('id', user.id)
     .single()
+
+  if (!profile) {
+    // First login — create profile and send to onboarding
+    await supabase.from('profiles').insert({
+      id: user.id,
+      email: user.email ?? null,
+      onboarding_completed: false,
+    })
+    redirect('/onboarding')
+  }
+
+  if (!profile.onboarding_completed) {
+    redirect('/onboarding')
+  }
 
   return (
     <div className="flex min-h-screen" style={{ background: 'var(--color-bg)' }}>
