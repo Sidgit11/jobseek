@@ -44,3 +44,4 @@ next-env.d.ts
 *.zip
 store-assets/
 ziOPGq76
+.claude/worktrees/

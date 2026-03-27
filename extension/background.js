@@ -125,6 +125,9 @@ async function storeScanMetrics(scanMetrics, geminiResults) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }).catch(err => console.warn('[Jobseek BG] Failed to store scan metrics:', err.message));
+
+    // Track last scan time for status reporting
+    chrome.storage.local.set({ lastScanTime: new Date().toISOString() });
   } catch (err) {
     console.warn('[Jobseek BG] Scan metrics error:', err.message);
   }
@@ -134,11 +137,41 @@ async function storeScanMetrics(scanMetrics, geminiResults) {
 // IMPORTANT: Do NOT use async in onMessageExternal — Chrome MV3 closes the
 // message channel before async resolves. Use .then() and return true synchronously.
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
-  // PING — used by the web app to verify extension is installed and working
+  // PING — used by the web app to verify extension is installed and get status
   if (message.action === 'PING') {
-    chrome.storage.local.get(['deviceToken'], (r) => {
-      sendResponse({ success: true, version: chrome.runtime.getManifest().version, deviceToken: r.deviceToken || null });
+    chrome.storage.local.get(['deviceToken', 'scanningPaused', 'lastScanTime'], (r) => {
+      sendResponse({
+        success: true,
+        version: chrome.runtime.getManifest().version,
+        deviceToken: r.deviceToken || null,
+        scanningPaused: !!r.scanningPaused,
+        lastScanTime: r.lastScanTime || null,
+      });
     });
+    return true;
+  }
+
+  // PAUSE_SCAN — pause automatic scanning
+  if (message.action === 'PAUSE_SCAN') {
+    chrome.storage.local.set({ scanningPaused: true });
+    console.log('[Jobseek BG] Scanning paused by web app');
+    sendResponse({ success: true });
+    return true;
+  }
+
+  // RESUME_SCAN — resume automatic scanning
+  if (message.action === 'RESUME_SCAN') {
+    chrome.storage.local.set({ scanningPaused: false });
+    console.log('[Jobseek BG] Scanning resumed by web app');
+    sendResponse({ success: true });
+    return true;
+  }
+
+  // TRIGGER_SCAN_NOW — force immediate scan
+  if (message.action === 'TRIGGER_SCAN_NOW') {
+    console.log('[Jobseek BG] Immediate scan triggered by web app');
+    runScan();
+    sendResponse({ success: true });
     return true;
   }
 
@@ -152,10 +185,6 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         console.error('[Jobseek BG] User profile scrape failed:', err.message);
         sendResponse({ success: false, error: err.message });
       });
-    return true; // MUST return true synchronously to keep channel open
-  }
-  if (message.action === 'PING') {
-    sendResponse({ success: true, version: chrome.runtime.getManifest().version });
     return true;
   }
 });
