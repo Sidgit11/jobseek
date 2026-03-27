@@ -1213,7 +1213,7 @@ function ExtensionStatusBar() {
   )
 }
 
-function NoTokenView() {
+function NoTokenView({ onRetry }: { onRetry: () => void }) {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center px-6" style={{ background: C.bg }}>
       <div
@@ -1265,11 +1265,20 @@ function NoTokenView() {
         <Chrome size={16} /> Install from Chrome Web Store <ExternalLink size={12} />
       </a>
 
-      <p className="mt-4 text-xs" style={{ color: C.muted }}>
-        Already installed?{' '}
+      <button
+        onClick={onRetry}
+        className="mt-4 flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-medium transition-all hover:brightness-110 cursor-pointer"
+        style={{ background: C.card, color: C.text, border: `1px solid ${C.border}` }}
+      >
+        <RefreshCw size={14} /> Already installed? Check again
+      </button>
+
+      <p className="mt-3 text-xs" style={{ color: C.muted }}>
+        After installing,{' '}
         <a href="https://linkedin.com/feed" target="_blank" rel="noopener noreferrer" style={{ color: C.accentSoft }}>
-          Open your LinkedIn feed →
-        </a>
+          open your LinkedIn feed →
+        </a>{' '}
+        to start scanning
       </p>
     </div>
   )
@@ -1334,16 +1343,36 @@ function SignalsPageContent() {
         })
       }
     } else {
-      // No URL token — try to get from user profile
+      // No URL token — try to get from user profile, then try extension detection
       fetch('/api/user/link-token')
         .then(res => res.json())
-        .then(data => {
+        .then(async (data) => {
           if (data.deviceToken) {
             setToken(data.deviceToken)
+            setTokenLoading(false)
+          } else {
+            // No token on server — try to detect extension directly
+            const ext = await detectExtension()
+            if (ext.found && ext.deviceToken) {
+              setToken(ext.deviceToken)
+              // Link the token to the user's profile
+              fetch('/api/user/link-token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: ext.deviceToken }),
+              }).catch(() => {})
+            }
+            setTokenLoading(false)
           }
         })
-        .catch(() => {})
-        .finally(() => setTokenLoading(false))
+        .catch(async () => {
+          // Server call failed — still try extension detection
+          const ext = await detectExtension()
+          if (ext.found && ext.deviceToken) {
+            setToken(ext.deviceToken)
+          }
+          setTokenLoading(false)
+        })
     }
   }, [urlToken, router])
 
@@ -1411,7 +1440,19 @@ function SignalsPageContent() {
       <Loader2 size={24} className="animate-spin" style={{ color: C.accent }} />
     </div>
   )
-  if (!token) return <NoTokenView />
+  if (!token) return <NoTokenView onRetry={async () => {
+    setTokenLoading(true)
+    const ext = await detectExtension()
+    if (ext.found && ext.deviceToken) {
+      setToken(ext.deviceToken)
+      fetch('/api/user/link-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: ext.deviceToken }),
+      }).catch(() => {})
+    }
+    setTokenLoading(false)
+  }} />
 
   // Signals tab: only show feed posts (degree = 1st/2nd/3rd).
   // degree = 'job' means it came from jobs/recommended pages → Companies Hiring only.
