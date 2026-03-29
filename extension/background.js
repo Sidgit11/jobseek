@@ -88,10 +88,16 @@ chrome.runtime.onInstalled.addListener(async () => {
     console.log(`[Jobseek] Signals dashboard: signals dashboard?token=${deviceToken}`);
   }
 
-  // Clear any stale scan pipeline state AND pending alarms from previous sessions
-  await chrome.storage.local.remove(['scanPipeline']);
+  // Clear any stale scan pipeline state, pending alarms, and pause state from previous sessions
+  await chrome.storage.local.remove(['scanPipeline', 'scanningPaused']);
   await chrome.alarms.clear('scan-next-step');
-  console.log('[Jobseek] Cleared stale scan pipeline state + alarms on install/reload');
+  console.log('[Jobseek] Cleared stale state on install/reload — ready to scan');
+
+  // Trigger first scan after a short delay (give LinkedIn time if tab is already open)
+  setTimeout(() => {
+    console.log('[Jobseek] Triggering initial scan after install...');
+    runScan();
+  }, 5000);
 });
 
 // ── Scan Metrics Storage ──
@@ -1122,11 +1128,11 @@ async function runScan() {
     const pipelineAge = scanPipeline.startedAt
       ? Date.now() - new Date(scanPipeline.startedAt).getTime()
       : Infinity;
-    if (pipelineAge > 5 * 60 * 1000) {
-      console.warn('[Jobseek BG] Stale scan pipeline detected (age: ' + Math.round(pipelineAge / 1000) + 's) — cleaning up');
+    if (pipelineAge > 3 * 60 * 1000) {
+      console.warn('[Jobseek BG] Stale scan pipeline detected (age: ' + Math.round(pipelineAge / 1000) + 's) — force cleaning up');
       await cleanupScanPipeline(scanPipeline, true);
     } else {
-      console.log('[Jobseek BG] Scan pipeline already in progress — skipping');
+      console.log('[Jobseek BG] Scan pipeline already in progress (age: ' + Math.round(pipelineAge / 1000) + 's) — skipping');
       return;
     }
   }

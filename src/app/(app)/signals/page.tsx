@@ -1098,6 +1098,19 @@ function ExtensionStatusBar() {
     const result = await detectExtension()
     setExt(result)
     setChecking(false)
+
+    if (result.found) {
+      // Auto-resume if stuck paused (workaround for deployed extension not clearing scanningPaused)
+      if (result.scanningPaused) {
+        await sendExtensionCommand('RESUME_SCAN')
+        await sendExtensionCommand('TRIGGER_SCAN_NOW')
+        setExt(prev => ({ ...prev, scanningPaused: false }))
+      }
+      // Auto-trigger first scan if no scan has ever run
+      if (!result.lastScanTime) {
+        await sendExtensionCommand('TRIGGER_SCAN_NOW')
+      }
+    }
   }, [])
 
   useEffect(() => {
@@ -1343,36 +1356,28 @@ function SignalsPageContent() {
         })
       }
     } else {
-      // No URL token — try to get from user profile, then try extension detection
-      fetch('/api/user/link-token')
+      // No URL token — try profile lookup AND extension detection in parallel
+      const serverPromise = fetch('/api/user/link-token')
         .then(res => res.json())
-        .then(async (data) => {
-          if (data.deviceToken) {
-            setToken(data.deviceToken)
-            setTokenLoading(false)
-          } else {
-            // No token on server — try to detect extension directly
-            const ext = await detectExtension()
-            if (ext.found && ext.deviceToken) {
-              setToken(ext.deviceToken)
-              // Link the token to the user's profile
-              fetch('/api/user/link-token', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token: ext.deviceToken }),
-              }).catch(() => {})
-            }
-            setTokenLoading(false)
+        .then(data => data.deviceToken || null)
+        .catch(() => null)
+      const extPromise = detectExtension()
+
+      Promise.all([serverPromise, extPromise]).then(([serverToken, ext]) => {
+        const resolvedToken = serverToken || (ext.found && ext.deviceToken ? ext.deviceToken : null)
+        if (resolvedToken) {
+          setToken(resolvedToken)
+          // If token came from extension (not server), link it to user profile
+          if (!serverToken && ext.found && ext.deviceToken) {
+            fetch('/api/user/link-token', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: ext.deviceToken }),
+            }).catch(() => {})
           }
-        })
-        .catch(async () => {
-          // Server call failed — still try extension detection
-          const ext = await detectExtension()
-          if (ext.found && ext.deviceToken) {
-            setToken(ext.deviceToken)
-          }
-          setTokenLoading(false)
-        })
+        }
+        setTokenLoading(false)
+      })
     }
   }, [urlToken, router])
 

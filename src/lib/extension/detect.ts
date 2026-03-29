@@ -37,12 +37,9 @@ function getChromeApi() {
   return (window as unknown as ChromeApi).chrome
 }
 
-export async function pingExtension(extId: string): Promise<ExtensionPingResult> {
-  const chromeApi = getChromeApi()
-  if (!chromeApi?.runtime?.sendMessage) return { success: false }
-
+async function pingOnce(chromeApi: NonNullable<ReturnType<typeof getChromeApi>>, extId: string, timeoutMs: number): Promise<ExtensionPingResult> {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve({ success: false }), 3000)
+    const timer = setTimeout(() => resolve({ success: false }), timeoutMs)
     try {
       chromeApi.runtime!.sendMessage!(extId, { action: 'PING' }, (resp: unknown) => {
         clearTimeout(timer)
@@ -54,6 +51,19 @@ export async function pingExtension(extId: string): Promise<ExtensionPingResult>
       resolve({ success: false })
     }
   })
+}
+
+export async function pingExtension(extId: string): Promise<ExtensionPingResult> {
+  const chromeApi = getChromeApi()
+  if (!chromeApi?.runtime?.sendMessage) return { success: false }
+
+  // First attempt — 3s timeout
+  const first = await pingOnce(chromeApi, extId, 3000)
+  if (first.success) return first
+
+  // Retry once after 1s — handles MV3 service worker wake-up delay
+  await new Promise((r) => setTimeout(r, 1000))
+  return pingOnce(chromeApi, extId, 3000)
 }
 
 export async function detectExtension(): Promise<ExtensionDetectResult> {
