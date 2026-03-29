@@ -145,11 +145,18 @@ async function storeScanMetrics(scanMetrics, geminiResults) {
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
   // PING — used by the web app to verify extension is installed and get status
   if (message.action === 'PING') {
-    chrome.storage.local.get(['deviceToken', 'scanningPaused', 'lastScanTime'], (r) => {
+    chrome.storage.local.get(['deviceToken', 'scanningPaused', 'lastScanTime'], async (r) => {
+      // Safety net: if deviceToken was never created (onInstalled failed), create it now
+      let token = r.deviceToken;
+      if (!token) {
+        token = crypto.randomUUID();
+        await chrome.storage.local.set({ deviceToken: token });
+        console.log('[Jobseek BG] PING created missing deviceToken:', token);
+      }
       sendResponse({
         success: true,
         version: chrome.runtime.getManifest().version,
-        deviceToken: r.deviceToken || null,
+        deviceToken: token,
         scanningPaused: !!r.scanningPaused,
         lastScanTime: r.lastScanTime || null,
       });
