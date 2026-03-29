@@ -1357,13 +1357,15 @@ function SignalsPageContent() {
       }
     } else {
       // No URL token — try profile lookup AND extension detection in parallel
+      console.log('[Signals] No URL token — starting parallel token resolution...')
       const serverPromise = fetch('/api/user/link-token')
         .then(res => res.json())
-        .then(data => data.deviceToken || null)
-        .catch(() => null)
+        .then(data => { console.log('[Signals] Server link-token response:', data); return data.deviceToken || null })
+        .catch((err) => { console.log('[Signals] Server link-token failed:', err); return null })
       const extPromise = detectExtension()
 
       Promise.all([serverPromise, extPromise]).then(([serverToken, ext]) => {
+        console.log('[Signals] Token resolution complete:', { serverToken: serverToken?.slice(0, 8) || null, extFound: ext.found, extToken: ext.deviceToken?.slice(0, 8) || null })
         const resolvedToken = serverToken || (ext.found && ext.deviceToken ? ext.deviceToken : null)
         if (resolvedToken) {
           setToken(resolvedToken)
@@ -1446,8 +1448,10 @@ function SignalsPageContent() {
     </div>
   )
   if (!token) return <NoTokenView onRetry={async () => {
+    console.log('[Signals] Check again clicked — detecting extension...')
     setTokenLoading(true)
     const ext = await detectExtension()
+    console.log('[Signals] Check again result:', { found: ext.found, deviceToken: ext.deviceToken?.slice(0, 8) || null, paused: ext.scanningPaused })
     if (ext.found && ext.deviceToken) {
       setToken(ext.deviceToken)
       fetch('/api/user/link-token', {

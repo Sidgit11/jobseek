@@ -55,23 +55,38 @@ async function pingOnce(chromeApi: NonNullable<ReturnType<typeof getChromeApi>>,
 
 export async function pingExtension(extId: string): Promise<ExtensionPingResult> {
   const chromeApi = getChromeApi()
-  if (!chromeApi?.runtime?.sendMessage) return { success: false }
+  if (!chromeApi?.runtime?.sendMessage) {
+    console.log('[Jobseek Detect] No chrome.runtime.sendMessage API available')
+    return { success: false }
+  }
 
   // First attempt — 3s timeout
+  console.log(`[Jobseek Detect] PING attempt 1 → ${extId.slice(0, 8)}...`)
   const first = await pingOnce(chromeApi, extId, 3000)
-  if (first.success) return first
+  if (first.success) {
+    console.log('[Jobseek Detect] PING attempt 1 succeeded:', { version: first.version, deviceToken: first.deviceToken?.slice(0, 8), paused: first.scanningPaused })
+    return first
+  }
+  console.log('[Jobseek Detect] PING attempt 1 failed (timeout or no response)')
 
   // Retry once after 1s — handles MV3 service worker wake-up delay
   await new Promise((r) => setTimeout(r, 1000))
-  return pingOnce(chromeApi, extId, 3000)
+  console.log(`[Jobseek Detect] PING attempt 2 (retry) → ${extId.slice(0, 8)}...`)
+  const second = await pingOnce(chromeApi, extId, 3000)
+  console.log(`[Jobseek Detect] PING attempt 2 ${second.success ? 'succeeded' : 'failed'}`)
+  return second
 }
 
 export async function detectExtension(): Promise<ExtensionDetectResult> {
   const chromeApi = getChromeApi()
-  if (!chromeApi?.runtime?.sendMessage) return { found: false }
+  if (!chromeApi?.runtime?.sendMessage) {
+    console.log('[Jobseek Detect] detectExtension: chrome API not available (not Chrome?)')
+    return { found: false }
+  }
 
   // Try stored ID first
   const stored = localStorage.getItem('jobseek_extension_id')
+  console.log(`[Jobseek Detect] detectExtension: stored ID = ${stored || 'none'}, known IDs = [${KNOWN_EXTENSION_IDS.join(', ')}]`)
   if (stored) {
     const r = await pingExtension(stored)
     if (r.success) {
