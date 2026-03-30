@@ -27,9 +27,14 @@ describe('buildRecruiterPrompt', () => {
     expect(prompt).toContain('Phase 5')
   })
 
+  it('mentions 5 exchanges', () => {
+    const prompt = buildRecruiterPrompt(1, {})
+    expect(prompt).toContain('5 exchanges')
+  })
+
   it('includes conversation rules', () => {
     const prompt = buildRecruiterPrompt(1, {})
-    expect(prompt).toContain('Ask EXACTLY ONE question per turn')
+    expect(prompt).toContain('EXACTLY ONE question per turn')
     expect(prompt).toContain('NEVER start with affirmations')
   })
 
@@ -84,7 +89,7 @@ describe('buildCommentPrompt', () => {
       post_text: 'test post',
       suggested_angle: null,
     })
-    expect(prompt).toContain('Take a thoughtful stance')
+    expect(prompt).toContain('Find a specific claim or insight in the post')
   })
 
   it('uses provided suggested angle', () => {
@@ -98,7 +103,7 @@ describe('buildCommentPrompt', () => {
     expect(prompt).toContain('Disagree on the timeline')
   })
 
-  it('includes anti-pattern rules', () => {
+  it('includes post-content-first approach', () => {
     const prompt = buildCommentPrompt(null, {
       author_name: 'X',
       author_title: 'Y',
@@ -106,8 +111,9 @@ describe('buildCommentPrompt', () => {
       post_text: 'post',
       suggested_angle: null,
     })
+    expect(prompt).toContain('SPECIFIC CONTENT of the post')
+    expect(prompt).toContain('First sentence must reference something SPECIFIC from the post')
     expect(prompt).toContain('NEVER start with "Great post"')
-    expect(prompt).toContain('Do NOT use')
   })
 })
 

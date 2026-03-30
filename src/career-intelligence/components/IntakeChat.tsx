@@ -67,13 +67,13 @@ export function IntakeChat({ phase, onPhaseChange, onFacts }: IntakeChatProps) {
         extracted_facts: data.extractedFacts ?? [],
       }])
 
-      // Auto-advance phase based on message count
+      // Auto-advance phase — 1 exchange per phase, 5 total
       const userMessages = messages.filter(m => m.role === 'user').length + 1
-      if (userMessages >= 4 && phase === 1) onPhaseChange(2)
-      else if (userMessages >= 8 && phase === 2) onPhaseChange(3)
-      else if (userMessages >= 11 && phase === 3) onPhaseChange(4)
-      else if (userMessages >= 13 && phase === 4) onPhaseChange(5)
-      else if (userMessages >= 15 && phase === 5) setIsComplete(true)
+      if (userMessages >= 1 && phase === 1) onPhaseChange(2)
+      else if (userMessages >= 2 && phase === 2) onPhaseChange(3)
+      else if (userMessages >= 3 && phase === 3) onPhaseChange(4)
+      else if (userMessages >= 4 && phase === 4) onPhaseChange(5)
+      else if (userMessages >= 5 && phase === 5) setIsComplete(true)
 
     } catch (err) {
       console.error('Intake chat error:', err)
