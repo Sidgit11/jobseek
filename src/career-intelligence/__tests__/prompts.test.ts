@@ -5,9 +5,8 @@ import { buildCompletionPrompt } from '../prompts/completion'
 
 describe('buildRecruiterPrompt', () => {
   it('includes the correct phase number', () => {
-    const prompt = buildRecruiterPrompt(3, {})
-    expect(prompt).toContain('Phase 3')
-    expect(prompt).toContain('you are currently in Phase 3')
+    const prompt = buildRecruiterPrompt(2, {})
+    expect(prompt).toContain('PHASE 2 OF 3')
   })
 
   it('includes partial model data as JSON', () => {
@@ -15,26 +14,43 @@ describe('buildRecruiterPrompt', () => {
     const prompt = buildRecruiterPrompt(1, model)
     expect(prompt).toContain('"headline"')
     expect(prompt).toContain('Senior PM')
-    expect(prompt).toContain('"skill_tags"')
   })
 
-  it('includes all 5 phases in the prompt', () => {
+  it('includes all 3 phases in the prompt', () => {
     const prompt = buildRecruiterPrompt(1, {})
     expect(prompt).toContain('Phase 1')
     expect(prompt).toContain('Phase 2')
     expect(prompt).toContain('Phase 3')
-    expect(prompt).toContain('Phase 4')
-    expect(prompt).toContain('Phase 5')
   })
 
-  it('mentions 5 exchanges', () => {
+  it('mentions 3 exchanges', () => {
     const prompt = buildRecruiterPrompt(1, {})
-    expect(prompt).toContain('5 exchanges')
+    expect(prompt).toContain('3 exchanges')
+  })
+
+  it('includes nudge examples', () => {
+    const prompt = buildRecruiterPrompt(1, {})
+    expect(prompt).toContain('_Example:')
+    expect(prompt).toContain('italicized nudge example')
+  })
+
+  it('includes LinkedIn context when provided', () => {
+    const prompt = buildRecruiterPrompt(1, {}, {
+      headline: 'PM at Stripe',
+      experience: [{ company: 'Stripe', role: 'PM', duration: '3 yrs' }],
+    })
+    expect(prompt).toContain('LINKEDIN DATA')
+    expect(prompt).toContain('Stripe')
+  })
+
+  it('works without LinkedIn context', () => {
+    const prompt = buildRecruiterPrompt(1, {}, null)
+    expect(prompt).not.toContain('LINKEDIN DATA')
   })
 
   it('includes conversation rules', () => {
     const prompt = buildRecruiterPrompt(1, {})
-    expect(prompt).toContain('EXACTLY ONE question per turn')
+    expect(prompt).toContain('EXACTLY ONE compound question')
     expect(prompt).toContain('NEVER start with affirmations')
   })
 

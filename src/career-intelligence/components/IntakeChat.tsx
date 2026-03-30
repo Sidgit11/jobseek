@@ -2,14 +2,14 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Send, CheckCircle, ArrowRight } from 'lucide-react'
+import { Send, CheckCircle, ArrowRight, SkipForward } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import type { IntakeMessage } from '@/career-intelligence/types'
 import { PHASES } from './IntakeProgress'
 
 const OPENING_MESSAGE: IntakeMessage = {
   role: 'assistant',
-  content: "Hey — I'm going to ask you a few questions so Jobseek can actually understand you, not just your job titles. This takes about 10 minutes and replaces every form we'd otherwise make you fill. Ready? Let's start: tell me in a sentence or two — what do you do, and what are you looking for next?",
+  content: "Hey — 3 quick questions so Jobseek can understand you deeply. Takes about 3 minutes.\n\nWhat do you do, what are you best at, and what kind of role are you looking for next?\n\n_Example: \"I'm a Senior PM with 6 years in B2B SaaS. Best at 0-to-1 product launches. Looking for Head of Product at Series A-B AI companies.\"_",
   timestamp: new Date().toISOString(),
   extracted_facts: [],
 }
@@ -40,7 +40,6 @@ export function IntakeChat({ phase, onPhaseChange, onFacts }: IntakeChatProps) {
     setInput('')
     setLoading(true)
 
-    // Optimistic update
     setMessages(prev => [...prev, {
       role: 'user',
       content: userMessage,
@@ -67,13 +66,11 @@ export function IntakeChat({ phase, onPhaseChange, onFacts }: IntakeChatProps) {
         extracted_facts: data.extractedFacts ?? [],
       }])
 
-      // Auto-advance phase — 1 exchange per phase, 5 total
+      // Auto-advance phase — 1 exchange per phase, 3 total
       const userMessages = messages.filter(m => m.role === 'user').length + 1
       if (userMessages >= 1 && phase === 1) onPhaseChange(2)
       else if (userMessages >= 2 && phase === 2) onPhaseChange(3)
-      else if (userMessages >= 3 && phase === 3) onPhaseChange(4)
-      else if (userMessages >= 4 && phase === 4) onPhaseChange(5)
-      else if (userMessages >= 5 && phase === 5) setIsComplete(true)
+      else if (userMessages >= 3 && phase === 3) setIsComplete(true)
 
     } catch (err) {
       console.error('Intake chat error:', err)
@@ -89,6 +86,27 @@ export function IntakeChat({ phase, onPhaseChange, onFacts }: IntakeChatProps) {
     router.push('/profile?intake=complete')
   }
 
+  async function handleSkip() {
+    // Create basic model from whatever profile data exists
+    await fetch('/api/intake/complete', { method: 'POST' }).catch(() => {})
+    router.push('/discover')
+  }
+
+  // Render message content with italic nudges
+  function renderContent(content: string) {
+    const parts = content.split(/(_[^_]+_)/g)
+    return parts.map((part, i) => {
+      if (part.startsWith('_') && part.endsWith('_')) {
+        return (
+          <span key={i} className="block mt-3 text-xs italic" style={{ color: 'var(--color-text-tertiary)' }}>
+            {part.slice(1, -1)}
+          </span>
+        )
+      }
+      return <span key={i}>{part}</span>
+    })
+  }
+
   return (
     <div className="flex flex-1 flex-col" style={{ maxHeight: '100vh' }}>
       {/* Header */}
@@ -101,19 +119,28 @@ export function IntakeChat({ phase, onPhaseChange, onFacts }: IntakeChatProps) {
             Career Interview
           </h2>
           <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-            Phase {phase} of {PHASES.length} · {Math.round((phase / PHASES.length) * 100)}% complete
+            Question {phase} of {PHASES.length} · ~{Math.max(1, 4 - phase)} min left
           </p>
         </div>
-        <div
-          className="h-1.5 w-32 rounded-full overflow-hidden"
-          style={{ background: 'var(--color-surface-3)' }}
-        >
-          <motion.div
-            className="h-full rounded-full"
-            style={{ background: '#A3E635' }}
-            animate={{ width: `${(phase / PHASES.length) * 100}%` }}
-            transition={{ duration: 0.4 }}
-          />
+        <div className="flex items-center gap-3">
+          <div
+            className="h-1.5 w-32 rounded-full overflow-hidden"
+            style={{ background: 'var(--color-surface-3)' }}
+          >
+            <motion.div
+              className="h-full rounded-full"
+              style={{ background: '#A3E635' }}
+              animate={{ width: `${(phase / PHASES.length) * 100}%` }}
+              transition={{ duration: 0.4 }}
+            />
+          </div>
+          <button
+            onClick={handleSkip}
+            className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-all hover:bg-[var(--color-surface-2)]"
+            style={{ color: 'var(--color-text-tertiary)', border: 'var(--border-default)' }}
+          >
+            <SkipForward size={12} /> Skip
+          </button>
         </div>
       </div>
 
@@ -129,7 +156,7 @@ export function IntakeChat({ phase, onPhaseChange, onFacts }: IntakeChatProps) {
               className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className="max-w-[680px] rounded-2xl px-5 py-3.5 text-sm leading-relaxed"
+                className="max-w-[680px] rounded-2xl px-5 py-3.5 text-sm leading-relaxed whitespace-pre-line"
                 style={msg.role === 'assistant' ? {
                   background: 'var(--color-surface)',
                   border: 'var(--border-subtle)',
@@ -142,7 +169,7 @@ export function IntakeChat({ phase, onPhaseChange, onFacts }: IntakeChatProps) {
                   borderRadius: '16px 4px 16px 16px',
                 }}
               >
-                {msg.content}
+                {msg.role === 'assistant' ? renderContent(msg.content) : msg.content}
               </div>
             </motion.div>
           ))}
@@ -175,7 +202,7 @@ export function IntakeChat({ phase, onPhaseChange, onFacts }: IntakeChatProps) {
                 Your career model is ready
               </h3>
               <p className="text-sm mb-4" style={{ color: 'var(--color-text-secondary)' }}>
-                Jobseek now understands your background deeply. Your profile, resume, and outreach will all use this.
+                Jobseek now understands your background. Your profile, resume, and outreach will all use this.
               </p>
               <button
                 onClick={handleComplete}
@@ -204,7 +231,7 @@ export function IntakeChat({ phase, onPhaseChange, onFacts }: IntakeChatProps) {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-              placeholder="Tell me about your work..."
+              placeholder="Type your answer here..."
               className="flex-1 rounded-xl px-4 py-3 text-sm outline-none transition-all"
               style={{
                 background: 'var(--color-bg)',
@@ -230,7 +257,7 @@ export function IntakeChat({ phase, onPhaseChange, onFacts }: IntakeChatProps) {
             </button>
           </div>
           <p className="mt-2 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
-            Press Enter to send · Your answers build your profile, resume, and outreach templates
+            Press Enter to send · Follow the example format for best results
           </p>
         </div>
       )}

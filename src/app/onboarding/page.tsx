@@ -243,7 +243,34 @@ export default function OnboardingPage() {
 
   async function handleFinish() {
     await fetch('/api/user/profile', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ candidate_summary: summary || undefined, onboarding_completed: true }) })
-    router.push('/dashboard')
+
+    // Seed candidate_model with LinkedIn data so intake AI has context
+    try {
+      const seedData: Record<string, unknown> = {}
+      if (scrapedProfile?.headline) seedData.headline = scrapedProfile.headline
+      if (scrapedProfile?.location) seedData.location = scrapedProfile.location
+      if (scrapedProfile?.experience?.length) {
+        seedData.work_experiences = scrapedProfile.experience.map((e, i) => ({
+          id: `onboard-${i}`,
+          company: e.company,
+          title: e.role,
+          start_date: '',
+          end_date: '',
+          description: '',
+          highlights: [],
+          skills: [],
+        }))
+      }
+      if (Object.keys(seedData).length > 0) {
+        await fetch('/api/intake/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: '__seed__', seed: seedData }),
+        }).catch(() => {})
+      }
+    } catch {}
+
+    router.push('/intake')
   }
 
   const handleDrop = useCallback((e: React.DragEvent) => {

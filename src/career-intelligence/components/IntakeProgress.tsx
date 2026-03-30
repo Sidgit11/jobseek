@@ -3,11 +3,9 @@
 import { motion, AnimatePresence } from 'framer-motion'
 
 const PHASES = [
-  { label: 'Who you are', desc: 'Role + what you want next' },
-  { label: 'Your best work', desc: 'Impact stories with metrics' },
-  { label: 'How you work', desc: 'Style + unique POV' },
-  { label: 'Your constraints', desc: 'What you will not do' },
-  { label: 'Your edge', desc: 'Your unfair advantage' },
+  { label: 'You + your target', desc: 'Role, strengths, what you want next' },
+  { label: 'Your best work', desc: 'One killer impact story with numbers' },
+  { label: 'Edge + constraints', desc: 'What makes you different + hard nos' },
 ]
 
 interface IntakeProgressProps {
@@ -28,7 +26,7 @@ export function IntakeProgress({ phase, facts }: IntakeProgressProps) {
         </p>
 
         <p className="mt-6 text-sm leading-relaxed" style={{ color: '#6B7280' }}>
-          We&apos;re building your career intelligence model. Everything Jobseek does — outreach, matching, presence — runs on what you share here.
+          3 quick questions. ~3 minutes. This powers your outreach, resume, and public profile.
         </p>
 
         {/* Phase progress */}

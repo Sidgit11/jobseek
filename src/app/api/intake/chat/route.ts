@@ -12,8 +12,16 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { message, conversationId, phase = 1 } = await request.json()
-  log.req({ userId: user.id, conversationId, phase, messageLength: message?.length })
+  const { message, conversationId, phase = 1, seed } = await request.json()
+  log.req({ userId: user.id, conversationId, phase, messageLength: message?.length, hasSeed: !!seed })
+
+  // Handle seed from onboarding (pre-populate candidate model with LinkedIn data)
+  if (message === '__seed__' && seed) {
+    await supabase.from('candidate_models')
+      .upsert({ user_id: user.id, ...seed, intake_phase: 0 }, { onConflict: 'user_id' })
+    log.step('model-seeded', { fields: Object.keys(seed).length })
+    return NextResponse.json({ success: true })
+  }
 
   // Load or create conversation
   let conversation
@@ -61,11 +69,24 @@ export async function POST(request: NextRequest) {
     .map(m => `${m.role === 'assistant' ? 'Recruiter' : 'Candidate'}: ${m.content}`)
     .join('\n')
 
-  log.step('gemini-start', { phase, historyLength: messages.length })
+  // Load user's profile for LinkedIn context
+  const { data: userProfile } = await supabase
+    .from('profiles')
+    .select('linkedin_headline, linkedin_experience, location')
+    .eq('id', user.id)
+    .single()
+
+  const linkedinContext = userProfile ? {
+    headline: userProfile.linkedin_headline,
+    experience: userProfile.linkedin_experience as Array<{ company: string; role: string; duration: string }> | null ?? undefined,
+    location: userProfile.location ?? undefined,
+  } : null
+
+  log.step('gemini-start', { phase, historyLength: messages.length, hasLinkedin: !!linkedinContext?.headline })
 
   const [aiText, extractionText] = await Promise.all([
     generateText(
-      buildRecruiterPrompt(phase, partialModel),
+      buildRecruiterPrompt(phase, partialModel, linkedinContext),
       'Conversation so far:\n' + conversationHistory,
       { temperature: 0.7, maxTokens: 512 }
     ),
