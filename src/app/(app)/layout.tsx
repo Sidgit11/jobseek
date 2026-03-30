@@ -1,4 +1,3 @@
-import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { Sidebar } from '@/components/layout/Sidebar'
 import type { Profile } from '@/types'
@@ -7,30 +6,20 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  if (!user) {
-    redirect('/login')
+  let profile = null
+
+  if (user) {
+    const { data } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .single()
+    profile = data
   }
 
-  // Check / create profile — handles first-time sign-in
-  let { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user.id)
-    .single()
-
-  if (!profile) {
-    // First login — create profile and send to onboarding
-    await supabase.from('profiles').insert({
-      id: user.id,
-      email: user.email ?? null,
-      onboarding_completed: false,
-    })
-    redirect('/onboarding')
-  }
-
-  if (!profile.onboarding_completed) {
-    redirect('/onboarding')
-  }
+  // TODO: Re-enable auth gate before merging to main
+  // if (!user) redirect('/login')
+  // if (!profile?.onboarding_completed) redirect('/onboarding')
 
   return (
     <div className="flex min-h-screen" style={{ background: 'var(--color-bg)' }}>
