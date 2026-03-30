@@ -6,10 +6,7 @@ export const EXTENSION_STORE_URL =
 
 export const EXTENSION_ID = 'cbhlkanipdkdohhiocngfbcjhghpgcbm'
 
-const KNOWN_EXTENSION_IDS = [
-  EXTENSION_ID,
-  'mmfnpipbaecpfbncnofaelmhkldnkcpb', // unpacked dev extension
-]
+const KNOWN_EXTENSION_IDS = [EXTENSION_ID]
 
 export interface ExtensionPingResult {
   success: boolean
