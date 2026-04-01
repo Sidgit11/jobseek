@@ -1,14 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { generateText } from '@/lib/google/client'
 import { routeLogger } from '@/lib/logger'
+import { getCorsHeaders } from '@/lib/cors'
 
 const log = routeLogger('user/extract-preferences')
-
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-}
 
 // Valid options that Gemini can pick from (must match frontend constants)
 const VALID_ROLES = ['Product Manager', 'Software Engineer', 'Designer', 'Data Scientist', 'Growth', 'GTM / Sales', 'Marketing', 'Operations']
@@ -46,8 +41,8 @@ RULES:
 
 Return ONLY the JSON. No markdown, no explanation.`
 
-export async function OPTIONS() {
-  return NextResponse.json({}, { headers: CORS_HEADERS })
+export async function OPTIONS(request: NextRequest) {
+  return NextResponse.json({}, { headers: getCorsHeaders(request.headers.get('origin')) })
 }
 
 export async function POST(request: NextRequest) {
@@ -55,7 +50,7 @@ export async function POST(request: NextRequest) {
     const { linkedinProfile, resumeText } = await request.json()
 
     if (!linkedinProfile && !resumeText) {
-      return NextResponse.json({ error: 'Provide linkedinProfile or resumeText' }, { status: 400, headers: CORS_HEADERS })
+      return NextResponse.json({ error: 'Provide linkedinProfile or resumeText' }, { status: 400, headers: getCorsHeaders(request.headers.get('origin')) })
     }
 
     // Build the user prompt with all available data
@@ -103,7 +98,7 @@ export async function POST(request: NextRequest) {
     const jsonMatch = text.match(/\{[\s\S]*\}/)
     if (!jsonMatch) {
       log.err('gemini-parse', new Error('Gemini returned non-JSON: ' + text.slice(0, 200)))
-      return NextResponse.json({ error: 'Failed to parse preferences' }, { status: 500, headers: CORS_HEADERS })
+      return NextResponse.json({ error: 'Failed to parse preferences' }, { status: 500, headers: getCorsHeaders(request.headers.get('origin')) })
     }
 
     const parsed = JSON.parse(jsonMatch[0])
@@ -126,9 +121,9 @@ export async function POST(request: NextRequest) {
 
     log.res(200, { name: result.name, roles: result.target_roles, seniority: result.seniority })
 
-    return NextResponse.json({ preferences: result }, { headers: CORS_HEADERS })
+    return NextResponse.json({ preferences: result }, { headers: getCorsHeaders(request.headers.get('origin')) })
   } catch (err) {
     log.err('extract', err)
-    return NextResponse.json({ error: 'Failed to extract preferences' }, { status: 500, headers: CORS_HEADERS })
+    return NextResponse.json({ error: 'Failed to extract preferences' }, { status: 500, headers: getCorsHeaders(request.headers.get('origin')) })
   }
 }

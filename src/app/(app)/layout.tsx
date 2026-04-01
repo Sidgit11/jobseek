@@ -7,15 +7,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  if (!user) {
-    redirect('/login')
-  }
+  if (!user) redirect('/login')
 
-  const { data: profile } = await supabase
+  const { data } = await supabase
     .from('profiles')
     .select('*')
     .eq('id', user.id)
     .single()
+  const profile = data
+
+  if (!profile?.onboarding_completed) redirect('/intake')
 
   return (
     <div className="flex min-h-screen" style={{ background: 'var(--color-bg)' }}>

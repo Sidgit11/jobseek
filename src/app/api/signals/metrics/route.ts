@@ -1,17 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { routeLogger } from '@/lib/logger'
+import { getCorsHeaders } from '@/lib/cors'
 
 const log = routeLogger('signals/metrics')
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS_HEADERS })
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders(request.headers.get('origin')) })
 }
 
 // POST — store scan session metrics
@@ -41,14 +36,14 @@ export async function POST(req: NextRequest) {
 
     if (error) {
       log.err('db-insert', new Error(error.message))
-      return NextResponse.json({ error: error.message }, { status: 500, headers: CORS_HEADERS })
+      return NextResponse.json({ error: error.message }, { status: 500, headers: getCorsHeaders(req.headers.get('origin')) })
     }
 
     log.res(200, { source: body.source || 'FEED', postsExtracted: body.posts_extracted })
-    return NextResponse.json({ ok: true }, { headers: CORS_HEADERS })
+    return NextResponse.json({ ok: true }, { headers: getCorsHeaders(req.headers.get('origin')) })
   } catch (err) {
     log.err('post', err)
-    return NextResponse.json({ error: 'Failed to store metrics' }, { status: 500, headers: CORS_HEADERS })
+    return NextResponse.json({ error: 'Failed to store metrics' }, { status: 500, headers: getCorsHeaders(req.headers.get('origin')) })
   }
 }
 
@@ -60,7 +55,7 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '20')
 
     if (!deviceToken) {
-      return NextResponse.json({ error: 'token param required' }, { status: 400, headers: CORS_HEADERS })
+      return NextResponse.json({ error: 'token param required' }, { status: 400, headers: getCorsHeaders(req.headers.get('origin')) })
     }
 
     const supabase = createClient(
@@ -76,11 +71,11 @@ export async function GET(req: NextRequest) {
       .limit(limit)
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500, headers: CORS_HEADERS })
+      return NextResponse.json({ error: error.message }, { status: 500, headers: getCorsHeaders(req.headers.get('origin')) })
     }
 
-    return NextResponse.json({ metrics: data }, { headers: CORS_HEADERS })
+    return NextResponse.json({ metrics: data }, { headers: getCorsHeaders(req.headers.get('origin')) })
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500, headers: CORS_HEADERS })
+    return NextResponse.json({ error: (err as Error).message }, { status: 500, headers: getCorsHeaders(req.headers.get('origin')) })
   }
 }

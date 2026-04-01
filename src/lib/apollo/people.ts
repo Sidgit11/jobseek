@@ -4,7 +4,7 @@
  * Apollo free tier has no working people search endpoints.
  */
 
-import { searchPeopleByDomain } from '@/services/hunter'
+import { searchPeopleByDomain } from '@/lib/hunter'
 import type { Person } from '@/types'
 
 function parseSeniority(seniority: string | null, title: string | null): string {

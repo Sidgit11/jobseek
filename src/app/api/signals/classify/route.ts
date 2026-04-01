@@ -1,19 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { generateText } from '@/lib/google/client'
 import { routeLogger } from '@/lib/logger'
+import { getCorsHeaders } from '@/lib/cors'
 
 const log = routeLogger('signals/classify')
 
-// CORS headers — allow Chrome extension origins (chrome-extension://*) + localhost
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-}
-
 // Handle preflight — Chrome extension fetch triggers an OPTIONS request first
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS_HEADERS })
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders(request.headers.get('origin')) })
 }
 
 // Default profile used when no user profile is provided (backward compat)
@@ -179,7 +173,7 @@ export async function POST(req: NextRequest) {
     const userProfile: UserProfile | undefined = body.userProfile
 
     if (!posts || posts.length === 0) {
-      return NextResponse.json({ signals: [] }, { headers: CORS_HEADERS })
+      return NextResponse.json({ signals: [] }, { headers: getCorsHeaders(req.headers.get('origin')) })
     }
 
     // Hard cap — never send more than 25 posts in one call
@@ -215,7 +209,7 @@ export async function POST(req: NextRequest) {
     const jsonMatch = stripped.match(/\[[\s\S]*\]/)
     if (!jsonMatch) {
       log.err('gemini-parse', new Error('Gemini returned non-JSON: ' + text.slice(0, 200)))
-      return NextResponse.json({ signals: [] }, { headers: CORS_HEADERS })
+      return NextResponse.json({ signals: [] }, { headers: getCorsHeaders(req.headers.get('origin')) })
     }
 
     const classifications: (GeminiClassification | null)[] = JSON.parse(jsonMatch[0])
@@ -259,7 +253,7 @@ export async function POST(req: NextRequest) {
     })
 
     log.res(200, { posts: batch.length, signals: signals.length })
-    return NextResponse.json({ signals }, { headers: CORS_HEADERS })
+    return NextResponse.json({ signals }, { headers: getCorsHeaders(req.headers.get('origin')) })
 
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
@@ -270,10 +264,10 @@ export async function POST(req: NextRequest) {
       log.warn('quota-hit', { hint: 'returning empty signals, posts will retry later' })
       return NextResponse.json(
         { signals: [], error: 'quota_exceeded', hint: 'Gemini spending cap reached. Check aistudio.google.com → your project → billing.' },
-        { status: 429, headers: CORS_HEADERS }
+        { status: 429, headers: getCorsHeaders(req.headers.get('origin')) }
       )
     }
 
-    return NextResponse.json({ error: message }, { status: 500, headers: CORS_HEADERS })
+    return NextResponse.json({ error: message }, { status: 500, headers: getCorsHeaders(req.headers.get('origin')) })
   }
 }

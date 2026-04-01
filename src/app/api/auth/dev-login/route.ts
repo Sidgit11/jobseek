@@ -8,12 +8,16 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-const DEV_EMAIL = 'dev@jobseek.local'
-const DEV_PASSWORD = 'jobseek-dev-2025!'
+const DEV_EMAIL = process.env.DEV_LOGIN_EMAIL || 'dev@jobseek.local'
+const DEV_PASSWORD = process.env.DEV_LOGIN_PASSWORD
 
 export async function POST() {
   if (process.env.NODE_ENV !== 'development') {
     return NextResponse.json({ error: 'Not available' }, { status: 404 })
+  }
+
+  if (!DEV_PASSWORD) {
+    return NextResponse.json({ error: 'DEV_LOGIN_PASSWORD not configured' }, { status: 500 })
   }
 
   const supabaseAdmin = createClient(

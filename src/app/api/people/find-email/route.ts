@@ -11,7 +11,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { findEmailForPerson } from '@/services/hunter'
+import { findEmailForPerson } from '@/lib/hunter'
 import { routeLogger } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {

@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Loader2, Save, Upload, RefreshCw, Linkedin, MapPin, Briefcase, GraduationCap, ExternalLink } from 'lucide-react'
+import { Loader2, Save, Upload, RefreshCw, Linkedin, MapPin, Briefcase, GraduationCap, ExternalLink, ArrowRight, Copy, Check, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
-import type { Profile } from '@/types'
+import type { Profile, CandidateModel } from '@/types'
 
 const TARGET_ROLES = ['Product Manager', 'Software Engineer', 'Designer', 'Data Scientist', 'Growth', 'GTM / Sales', 'Marketing', 'Operations', 'Other']
 const TARGET_INDUSTRIES = ['AI / ML', 'Fintech', 'SaaS', 'Consumer', 'HealthTech', 'Crypto / Web3', 'Developer Tools', 'Climate Tech', 'E-Commerce', 'Other']
@@ -59,6 +59,8 @@ export default function ProfilePage() {
   const [targetLocations, setTargetLocations] = useState<string[]>([])
   const [companyStages, setCompanyStages] = useState<string[]>([])
   const [candidateSummary, setCandidateSummary] = useState('')
+  const [candidateModel, setCandidateModel] = useState<CandidateModel | null>(null)
+  const [slugCopied, setSlugCopied] = useState(false)
 
   useEffect(() => {
     fetch('/api/user/profile')
@@ -77,6 +79,11 @@ export default function ProfilePage() {
         setCandidateSummary(p?.candidate_summary ?? '')
         setLoading(false)
       })
+    // Fetch candidate model
+    fetch('/api/intake/model')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.model) setCandidateModel(data.model) })
+      .catch(() => {})
   }, [])
 
   async function handleSave() {
@@ -142,6 +149,82 @@ export default function ProfilePage() {
         </div>
 
         <div className="space-y-5">
+
+          {/* ── Career Intelligence CTA / Summary ── */}
+          {candidateModel && candidateModel.intake_phase >= 6 ? (
+            <div className="rounded-2xl p-5" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-lime-border)' }}>
+              <div className="flex items-center gap-2 mb-3">
+                <Sparkles size={14} style={{ color: '#A3E635' }} />
+                <h2 className="text-xs font-semibold" style={{ color: 'var(--color-lime-text)', letterSpacing: '0.06em' }}>
+                  Career Model — Complete
+                </h2>
+                <span className="ml-auto text-[10px] font-medium rounded-full px-2 py-0.5"
+                  style={{ background: 'var(--color-lime-subtle)', color: 'var(--color-lime-text)' }}>
+                  {candidateModel.completeness_score}% complete
+                </span>
+              </div>
+              {candidateModel.headline && (
+                <p className="text-sm font-semibold mb-1" style={{ color: 'var(--color-text-primary)' }}>
+                  {candidateModel.headline}
+                </p>
+              )}
+              {candidateModel.positioning && (
+                <p className="text-xs mb-3" style={{ color: 'var(--color-text-secondary)' }}>
+                  {candidateModel.positioning}
+                </p>
+              )}
+              <div className="flex items-center gap-2">
+                {profile?.slug && (
+                  <button
+                    onClick={() => {
+                      const url = `${window.location.origin}/p/${profile.slug}`
+                      navigator.clipboard.writeText(url)
+                      setSlugCopied(true)
+                      setTimeout(() => setSlugCopied(false), 2000)
+                      toast.success('Profile link copied')
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all hover:brightness-105"
+                    style={{ background: '#A3E635', color: '#1A2E05' }}
+                  >
+                    {slugCopied ? <><Check size={10} /> Copied</> : <><Copy size={10} /> Copy public link</>}
+                  </button>
+                )}
+                {profile?.slug && (
+                  <a
+                    href={`/p/${profile.slug}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-all hover:bg-[var(--color-surface-2)]"
+                    style={{ border: 'var(--border-default)', color: 'var(--color-text-secondary)' }}
+                  >
+                    View profile ↗
+                  </a>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl p-5" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-lime-border)' }}>
+              <div className="flex items-center gap-2 mb-2">
+                <Sparkles size={14} style={{ color: '#A3E635' }} />
+                <h2 className="text-xs font-semibold" style={{ color: 'var(--color-lime-text)', letterSpacing: '0.06em' }}>
+                  Career Intelligence
+                </h2>
+              </div>
+              <h3 className="text-sm font-bold mb-1" style={{ color: 'var(--color-text-primary)' }}>
+                Build your career model
+              </h3>
+              <p className="text-xs mb-3" style={{ color: 'var(--color-text-secondary)' }}>
+                A 10-minute conversation that powers your outreach, resume, and public presence. Replaces every form.
+              </p>
+              <a
+                href="/intake"
+                className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition-all hover:brightness-105 active:scale-[0.97]"
+                style={{ background: '#A3E635', color: '#1A2E05' }}
+              >
+                Start Career Interview <ArrowRight size={12} />
+              </a>
+            </div>
+          )}
 
           {/* ── LinkedIn Profile Card ── */}
           {(profile?.linkedin_headline || experience) && (

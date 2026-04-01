@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
+import { getCorsHeaders } from '@/lib/cors'
 
 function db() {
   return createSupabaseClient(
@@ -8,14 +9,8 @@ function db() {
   )
 }
 
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS })
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders(request.headers.get('origin')) })
 }
 
 interface EnrichProfile {
@@ -42,21 +37,21 @@ export async function POST(req: NextRequest) {
     if (!token) {
       return NextResponse.json(
         { error: 'token is required' },
-        { status: 400, headers: CORS }
+        { status: 400, headers: getCorsHeaders(req.headers.get('origin')) }
       )
     }
 
     if (!signalId) {
       return NextResponse.json(
         { error: 'signalId is required' },
-        { status: 400, headers: CORS }
+        { status: 400, headers: getCorsHeaders(req.headers.get('origin')) }
       )
     }
 
     if (!profile) {
       return NextResponse.json(
         { error: 'profile is required' },
-        { status: 400, headers: CORS }
+        { status: 400, headers: getCorsHeaders(req.headers.get('origin')) }
       )
     }
 
@@ -81,15 +76,15 @@ export async function POST(req: NextRequest) {
       console.error('[signals/enrich] Supabase update error:', error.message)
       return NextResponse.json(
         { error: error.message },
-        { status: 500, headers: CORS }
+        { status: 500, headers: getCorsHeaders(req.headers.get('origin')) }
       )
     }
 
     console.log(`[signals/enrich] Enriched signal ${signalId} for token ${token.slice(0, 8)}…`)
-    return NextResponse.json({ enriched: true }, { headers: CORS })
+    return NextResponse.json({ enriched: true }, { headers: getCorsHeaders(req.headers.get('origin')) })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     console.error('[signals/enrich] Error:', message)
-    return NextResponse.json({ error: message }, { status: 500, headers: CORS })
+    return NextResponse.json({ error: message }, { status: 500, headers: getCorsHeaders(req.headers.get('origin')) })
   }
 }
