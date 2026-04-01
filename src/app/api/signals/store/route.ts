@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { routeLogger } from '@/lib/logger'
+import { getCorsHeaders } from '@/lib/cors'
 
 const log = routeLogger('signals/store')
 
@@ -11,14 +12,8 @@ function db() {
   )
 }
 
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS })
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders(request.headers.get('origin')) })
 }
 
 interface IncomingSignal {
@@ -66,12 +61,12 @@ export async function POST(req: NextRequest) {
     if (!token) {
       return NextResponse.json(
         { error: 'token is required' },
-        { status: 400, headers: CORS }
+        { status: 400, headers: getCorsHeaders(req.headers.get('origin')) }
       )
     }
 
     if (!signals || signals.length === 0) {
-      return NextResponse.json({ stored: 0 }, { headers: CORS })
+      return NextResponse.json({ stored: 0 }, { headers: getCorsHeaders(req.headers.get('origin')) })
     }
 
     const supabase = db()
@@ -108,7 +103,7 @@ export async function POST(req: NextRequest) {
       log.err('supabase-upsert', new Error(error.message))
       return NextResponse.json(
         { error: error.message },
-        { status: 500, headers: CORS }
+        { status: 500, headers: getCorsHeaders(req.headers.get('origin')) }
       )
     }
 
@@ -120,10 +115,10 @@ export async function POST(req: NextRequest) {
     )
 
     log.res(200, { stored: rows.length })
-    return NextResponse.json({ stored: rows.length }, { headers: CORS })
+    return NextResponse.json({ stored: rows.length }, { headers: getCorsHeaders(req.headers.get('origin')) })
   } catch (err: unknown) {
     log.err('store', err)
     const message = err instanceof Error ? err.message : 'Unknown error'
-    return NextResponse.json({ error: message }, { status: 500, headers: CORS })
+    return NextResponse.json({ error: message }, { status: 500, headers: getCorsHeaders(req.headers.get('origin')) })
   }
 }

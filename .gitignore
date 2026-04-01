@@ -44,4 +44,6 @@ next-env.d.ts
 *.zip
 store-assets/
 ziOPGq76
-.claude/worktrees/
+
+# Claude Code local config
+.claude/

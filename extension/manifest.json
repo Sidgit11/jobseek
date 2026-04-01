@@ -8,7 +8,7 @@
     "https://www.linkedin.com/*"
   ],
   "externally_connectable": {
-    "matches": ["https://*.jobseek.ai/*", "https://jobseek.ai/*", "https://*.vercel.app/*", "https://jobseek-sigma.vercel.app/*"]
+    "matches": ["https://*.jobseek.ai/*", "https://jobseek.ai/*", "https://jobseek-sigma.vercel.app/*"]
   },
   "background": {
     "service_worker": "background.js"

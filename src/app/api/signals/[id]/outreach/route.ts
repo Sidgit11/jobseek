@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { generateText } from '@/lib/google/client'
+import { getCorsHeaders } from '@/lib/cors'
 
 function db() {
   return createSupabaseClient(
@@ -9,14 +10,8 @@ function db() {
   )
 }
 
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS })
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders(request.headers.get('origin')) })
 }
 
 const SYSTEM_PROMPT = `You are Jobseek's outreach strategist. You help job seekers craft perfectly personalized outreach based on real LinkedIn signals.
@@ -114,7 +109,7 @@ export async function POST(
     if (!token) {
       return NextResponse.json(
         { error: 'token is required' },
-        { status: 400, headers: CORS }
+        { status: 400, headers: getCorsHeaders(req.headers.get('origin')) }
       )
     }
 
@@ -131,7 +126,7 @@ export async function POST(
     if (fetchError || !signalData) {
       return NextResponse.json(
         { error: 'Signal not found' },
-        { status: 404, headers: CORS }
+        { status: 404, headers: getCorsHeaders(req.headers.get('origin')) }
       )
     }
 
@@ -176,7 +171,7 @@ export async function POST(
       console.error(`[signals/${id}/outreach] Gemini returned non-JSON:`, rawText.slice(0, 200))
       return NextResponse.json(
         { error: 'Failed to parse outreach from AI response' },
-        { status: 500, headers: CORS }
+        { status: 500, headers: getCorsHeaders(req.headers.get('origin')) }
       )
     }
 
@@ -197,7 +192,7 @@ export async function POST(
     }
 
     console.log(`[signals/${id}/outreach] Done — bestChannel: ${outreach.bestChannel}`)
-    return NextResponse.json(outreach, { headers: CORS })
+    return NextResponse.json(outreach, { headers: getCorsHeaders(req.headers.get('origin')) })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     console.error(`[signals/outreach] Error:`, message)
@@ -205,10 +200,10 @@ export async function POST(
     if (message.includes('429') || message.includes('spending cap') || message.includes('quota')) {
       return NextResponse.json(
         { error: 'quota_exceeded', hint: 'Gemini spending cap reached.' },
-        { status: 429, headers: CORS }
+        { status: 429, headers: getCorsHeaders(req.headers.get('origin')) }
       )
     }
 
-    return NextResponse.json({ error: message }, { status: 500, headers: CORS })
+    return NextResponse.json({ error: message }, { status: 500, headers: getCorsHeaders(req.headers.get('origin')) })
   }
 }

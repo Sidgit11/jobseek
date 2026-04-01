@@ -1,17 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { routeLogger } from '@/lib/logger'
+import { getCorsHeaders } from '@/lib/cors'
 
 const log = routeLogger('user/scrape-linkedin')
 
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-}
-
-export async function OPTIONS() {
-  return NextResponse.json({}, { headers: CORS_HEADERS })
+export async function OPTIONS(request: NextRequest) {
+  return NextResponse.json({}, { headers: getCorsHeaders(request.headers.get('origin')) })
 }
 
 // POST — receive scraped LinkedIn profile data and store on the user's profile
@@ -25,7 +20,7 @@ export async function POST(request: NextRequest) {
     const { linkedinUrl, scrapedProfile, deviceToken } = body
 
     if (!linkedinUrl || typeof linkedinUrl !== 'string') {
-      return NextResponse.json({ error: 'linkedinUrl is required' }, { status: 400, headers: CORS_HEADERS })
+      return NextResponse.json({ error: 'linkedinUrl is required' }, { status: 400, headers: getCorsHeaders(request.headers.get('origin')) })
     }
 
     // Determine which user to update
@@ -48,7 +43,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: CORS_HEADERS })
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: getCorsHeaders(request.headers.get('origin')) })
     }
 
     // Build the update payload
@@ -112,16 +107,16 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       log.err('db-update', new Error(error.message))
-      return NextResponse.json({ error: error.message }, { status: 500, headers: CORS_HEADERS })
+      return NextResponse.json({ error: error.message }, { status: 500, headers: getCorsHeaders(request.headers.get('origin')) })
     }
 
     log.res(200, { scraped: !!scrapedProfile, stored: true })
     return NextResponse.json({
       scraped: !!scrapedProfile,
       stored: true,
-    }, { headers: CORS_HEADERS })
+    }, { headers: getCorsHeaders(request.headers.get('origin')) })
   } catch (err) {
     log.err('scrape', err)
-    return NextResponse.json({ error: 'Failed to process profile' }, { status: 500, headers: CORS_HEADERS })
+    return NextResponse.json({ error: 'Failed to process profile' }, { status: 500, headers: getCorsHeaders(request.headers.get('origin')) })
   }
 }

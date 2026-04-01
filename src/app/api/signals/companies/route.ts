@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { routeLogger } from '@/lib/logger'
+import { getCorsHeaders } from '@/lib/cors'
 import {
   normalizeCompanyName,
   looksLikePersonName,
@@ -23,14 +24,8 @@ function db() {
   )
 }
 
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS })
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders(request.headers.get('origin')) })
 }
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -71,7 +66,7 @@ export async function GET(req: NextRequest) {
     if (!token) {
       return NextResponse.json(
         { error: 'token query param is required' },
-        { status: 400, headers: CORS }
+        { status: 400, headers: getCorsHeaders(req.headers.get('origin')) }
       )
     }
 
@@ -124,18 +119,18 @@ export async function GET(req: NextRequest) {
 
       return NextResponse.json(
         { companies: result, total: result.length, materialized: true },
-        { headers: CORS }
+        { headers: getCorsHeaders(req.headers.get('origin')) }
       )
     }
 
     // Fallback: aggregate from linkedin_signals in-memory (pre-migration)
     log.step('fallback', { reason: 'no materialized data' })
-    return fallbackAggregation(supabase, token)
+    return fallbackAggregation(supabase, token, req.headers.get('origin'))
 
   } catch (err: unknown) {
     log.err('get', err)
     const message = err instanceof Error ? err.message : 'Unknown error'
-    return NextResponse.json({ error: message }, { status: 500, headers: CORS })
+    return NextResponse.json({ error: message }, { status: 500, headers: getCorsHeaders(req.headers.get('origin')) })
   }
 }
 
@@ -150,14 +145,14 @@ export async function POST(req: NextRequest) {
     if (!token || !signals?.length) {
       return NextResponse.json(
         { error: 'token and signals are required' },
-        { status: 400, headers: CORS }
+        { status: 400, headers: getCorsHeaders(req.headers.get('origin')) }
       )
     }
 
     const supabase = db()
     const jobSignals = signals.filter(isJobSignal)
     if (jobSignals.length === 0) {
-      return NextResponse.json({ materialized: 0 }, { headers: CORS })
+      return NextResponse.json({ materialized: 0 }, { headers: getCorsHeaders(req.headers.get('origin')) })
     }
 
     let companiesUpserted = 0
@@ -285,19 +280,19 @@ export async function POST(req: NextRequest) {
     log.res(200, { companies: companiesUpserted, jobs: jobsUpserted })
     return NextResponse.json(
       { materialized: companiesUpserted, jobs: jobsUpserted },
-      { headers: CORS }
+      { headers: getCorsHeaders(req.headers.get('origin')) }
     )
 
   } catch (err: unknown) {
     log.err('post', err)
     const message = err instanceof Error ? err.message : 'Unknown error'
-    return NextResponse.json({ error: message }, { status: 500, headers: CORS })
+    return NextResponse.json({ error: message }, { status: 500, headers: getCorsHeaders(req.headers.get('origin')) })
   }
 }
 
 // ── Fallback: in-memory aggregation from linkedin_signals ───────────────────
 
-async function fallbackAggregation(supabase: ReturnType<typeof db>, token: string) {
+async function fallbackAggregation(supabase: ReturnType<typeof db>, token: string, requestOrigin: string | null) {
   const { data, error } = await supabase
     .from('linkedin_signals')
     .select('*')
@@ -307,7 +302,7 @@ async function fallbackAggregation(supabase: ReturnType<typeof db>, token: strin
 
   if (error) {
     log.err('supabase-query', new Error(error.message))
-    return NextResponse.json({ error: error.message }, { status: 500, headers: CORS })
+    return NextResponse.json({ error: error.message }, { status: 500, headers: getCorsHeaders(requestOrigin) })
   }
 
   const rows = (data ?? []) as SignalRow[]
@@ -377,6 +372,6 @@ async function fallbackAggregation(supabase: ReturnType<typeof db>, token: strin
 
   return NextResponse.json(
     { companies, total: companies.length, materialized: false },
-    { headers: CORS }
+    { headers: getCorsHeaders(requestOrigin) }
   )
 }

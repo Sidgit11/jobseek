@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { generateText } from '@/lib/google/client'
+import { getCorsHeaders } from '@/lib/cors'
 
 function db() {
   return createSupabaseClient(
@@ -9,14 +10,8 @@ function db() {
   )
 }
 
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS })
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, { status: 204, headers: getCorsHeaders(request.headers.get('origin')) })
 }
 
 // ── POST: Generate a new scan summary ───────────────────────────────────────
@@ -42,14 +37,14 @@ export async function POST(req: NextRequest) {
     if (!token) {
       return NextResponse.json(
         { error: 'token is required' },
-        { status: 400, headers: CORS }
+        { status: 400, headers: getCorsHeaders(req.headers.get('origin')) }
       )
     }
 
     if (!Array.isArray(signals) || signals.length === 0) {
       return NextResponse.json(
         { error: 'signals array is required and must not be empty' },
-        { status: 400, headers: CORS }
+        { status: 400, headers: getCorsHeaders(req.headers.get('origin')) }
       )
     }
 
@@ -113,12 +108,12 @@ Be specific — reference actual names and companies from the signals. Keep it t
         signalCount: signals.length,
         signalBreakdown: breakdown,
       },
-      { headers: CORS }
+      { headers: getCorsHeaders(req.headers.get('origin')) }
     )
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     console.error('[signals/summary] Error:', message)
-    return NextResponse.json({ error: message }, { status: 500, headers: CORS })
+    return NextResponse.json({ error: message }, { status: 500, headers: getCorsHeaders(req.headers.get('origin')) })
   }
 }
 
@@ -132,7 +127,7 @@ export async function GET(req: NextRequest) {
     if (!token) {
       return NextResponse.json(
         { error: 'token query param is required' },
-        { status: 400, headers: CORS }
+        { status: 400, headers: getCorsHeaders(req.headers.get('origin')) }
       )
     }
 
@@ -150,7 +145,7 @@ export async function GET(req: NextRequest) {
       // No summary yet — that's fine
       return NextResponse.json(
         { summary: null },
-        { headers: CORS }
+        { headers: getCorsHeaders(req.headers.get('origin')) }
       )
     }
 
@@ -161,11 +156,11 @@ export async function GET(req: NextRequest) {
         signalBreakdown: data.signal_breakdown,
         createdAt: data.created_at,
       },
-      { headers: CORS }
+      { headers: getCorsHeaders(req.headers.get('origin')) }
     )
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     console.error('[signals/summary] Error:', message)
-    return NextResponse.json({ error: message }, { status: 500, headers: CORS })
+    return NextResponse.json({ error: message }, { status: 500, headers: getCorsHeaders(req.headers.get('origin')) })
   }
 }
