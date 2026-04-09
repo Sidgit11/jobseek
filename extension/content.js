@@ -2,6 +2,15 @@
 // Sole job: scrape raw posts + pre-filter. Zero classification logic here.
 // Classification happens in the Next.js API via Gemini.
 
+// Forward content-script logs to the background service worker so they're
+// visible in the SW console even when the silent scan tab is closed.
+function debugLog(message, data) {
+  try {
+    console.log(message, data ?? '');
+    chrome.runtime.sendMessage({ action: 'DEBUG_LOG', message, data });
+  } catch {}
+}
+
 // ─── Company Name Validation Helpers ────────────────────────────────────────
 
 // Detect if a string looks like a person's name (e.g., "Aditya Sharma", "Suravi Shome")
@@ -993,17 +1002,21 @@ function sendBatch(accumulator, scanMetrics) {
 
   // ── Step 1: Initial scan of whatever is currently in the DOM ──
   const initial = extractFeedPosts();
+  debugLog(`[Jobseek] extractFeedPosts (initial) → ${initial.length} posts`, {
+    sources: initial.slice(0, 5).map(p => ({ source: p.source, degree: p.degree, text: (p.text || '').slice(0, 80) })),
+  });
   const r1 = await collectUnseen(initial, collected);
   trackMetrics(r1);
-  console.log(`[Jobseek] Initial scan: ${r1.total} posts | ${r1.filtered} passed filter | ${r1.added} new`);
+  debugLog(`[Jobseek] Initial scan: ${r1.total} posts | ${r1.filtered} passed filter | ${r1.added} new`);
 
   // Also grab any recommended jobs widget visible in the initial viewport
   const initialJobs = extractRecommendedJobs();
   const initialJobLinks = extractFeedJobLinks();
+  debugLog(`[Jobseek] extractRecommendedJobs (initial) → ${initialJobs.length}, extractFeedJobLinks (initial) → ${initialJobLinks.length}`);
   const allInitialJobs = initialJobs.concat(initialJobLinks);
   if (allInitialJobs.length > 0) {
     const rj1 = await collectUnseen(allInitialJobs, collected);
-    console.log(`[Jobseek] Initial feed jobs: ${allInitialJobs.length} found (widget: ${initialJobs.length}, links: ${initialJobLinks.length}) | ${rj1.added} new`);
+    debugLog(`[Jobseek] Initial feed jobs: ${allInitialJobs.length} found (widget: ${initialJobs.length}, links: ${initialJobLinks.length}) | ${rj1.added} new`);
   }
 
   // ── Step 2: Scroll to top so fresh posts load, then scan down ──
@@ -1032,11 +1045,27 @@ function sendBatch(accumulator, scanMetrics) {
   // ── Step 4: Final collect after scroll settles, then send ONE batch ──
   await new Promise(r => setTimeout(r, 2000));
   const final = extractFeedPosts();
-  const finalJobs = extractRecommendedJobs().concat(extractFeedJobLinks());
+  const finalRecJobs = extractRecommendedJobs();
+  const finalJobLinks = extractFeedJobLinks();
+  const finalJobs = finalRecJobs.concat(finalJobLinks);
+  debugLog(`[Jobseek] Final extractors → extractFeedPosts: ${final.length}, extractRecommendedJobs: ${finalRecJobs.length}, extractFeedJobLinks: ${finalJobLinks.length}`);
   const rFinal = await collectUnseen(final.concat(finalJobs), collected);
   trackMetrics(rFinal);
-  if (finalJobs.length > 0) console.log(`[Jobseek] Final feed job links: ${finalJobs.length} found`);
 
-  console.log(`[Jobseek] Scan complete. Funnel: ${scanMetrics.postsExtracted} extracted → ${scanMetrics.postsAfterPrefilter} after prefilter → ${scanMetrics.postsAfterDedup} after dedup → ${collected.size} to send`);
+  // Breakdown of what we're about to send: how many are feed-bound vs job-bound?
+  const JOB_SOURCES_CS = new Set(['JOBS', 'FEED_JOBS_WIDGET']);
+  const collectedArr = Array.from(collected.values());
+  const feedBound = collectedArr.filter(p => p.degree !== 'job' && !JOB_SOURCES_CS.has(p.source));
+  const jobBound = collectedArr.filter(p => p.degree === 'job' || JOB_SOURCES_CS.has(p.source));
+  const sourceCounts = collectedArr.reduce((acc, p) => {
+    acc[p.source || 'UNKNOWN'] = (acc[p.source || 'UNKNOWN'] || 0) + 1;
+    return acc;
+  }, {});
+  debugLog(`[Jobseek] Collected breakdown: ${collectedArr.length} total | ${feedBound.length} feed→Gemini | ${jobBound.length} jobs→direct-store`, { sourceCounts });
+  if (feedBound.length === 0 && collectedArr.length > 0) {
+    debugLog(`[Jobseek] WARNING: all collected posts tagged as job-source. Sample:`, collectedArr.slice(0, 5).map(p => ({ source: p.source, degree: p.degree, text: (p.text || '').slice(0, 100) })));
+  }
+
+  debugLog(`[Jobseek] Scan complete. Funnel: ${scanMetrics.postsExtracted} extracted → ${scanMetrics.postsAfterPrefilter} after prefilter → ${scanMetrics.postsAfterDedup} after dedup → ${collected.size} to send`);
   sendBatch(collected, scanMetrics);
 })();

@@ -533,6 +533,11 @@ chrome.runtime.onMessage.addListener((message, sender) => {
     console.log('[Jobseek BG] Immediate scan triggered — user resumed');
     runScan();
   }
+  if (message.action === 'DEBUG_LOG') {
+    // Forward content-script logs into the service worker console so we can
+    // see what extractors return even when the silent scan tab is closed.
+    console.log('[Jobseek CS→BG]', message.message, message.data ?? '');
+  }
   if (message.action === 'PROFILE_DATA') {
     // Profile scraper completed — store the data for the enrichment handler
     // Skip if this is a user's own profile scrape (handled by scrapeUserLinkedInProfile listener)
