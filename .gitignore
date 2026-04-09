@@ -44,6 +44,8 @@ next-env.d.ts
 *.zip
 store-assets/
 ziOPGq76
+dist/
+extension/.dev-key/
 
 # Claude Code local config
 .claude/

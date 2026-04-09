@@ -6,7 +6,12 @@ export const EXTENSION_STORE_URL =
 
 export const EXTENSION_ID = 'cbhlkanipdkdohhiocngfbcjhghpgcbm'
 
-const KNOWN_EXTENSION_IDS = [EXTENSION_ID]
+// Dev extension — loaded unpacked from extension/ with manifest.dev.json.
+// ID is pinned via the `key` field in manifest.dev.json so it's stable
+// across reloads and machines. See extension/README.md for the dev workflow.
+export const DEV_EXTENSION_ID = 'cgcnjhiiilpipijbooeblhhjamkiafof'
+
+const KNOWN_EXTENSION_IDS = [EXTENSION_ID, DEV_EXTENSION_ID]
 
 export interface ExtensionPingResult {
   success: boolean

@@ -8,7 +8,10 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "ext:dev": "node scripts/ext-build.mjs dev",
+    "ext:prod": "node scripts/ext-build.mjs prod",
+    "ext:zip": "npm run ext:prod && node scripts/ext-build.mjs zip"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",

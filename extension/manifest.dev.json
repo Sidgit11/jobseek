@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Jobseek (Dev) – Career Signal Intelligence",
+  "version": "1.0.3",
+  "description": "DEV BUILD — do not upload to Chrome Web Store. Capture live hiring signals from LinkedIn and generate personalized outreach.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArOEKB4rV/g9gu6pqIZTLOvGqcvVx7TA2/0AB1lFK2fHu7sO41gJZbnHtEEqOs/iHyWu00AZ1z/asPCWEGdLA+MSCX6p3DjZqsN+lSqOetrIbA4EcsJdNktG3Pus0EcAcxptqvKCOqLOjjJhlvpOqqRnLR23inDpZrYA5HJue+q34zc30i+m6lsdJreWvu2YcBFqtfb500otrpMjYro9enV2YXGc31f+/ENQrFQT0IC2qIo3glVAHVoPrhdz08yNcE9cebFu8Rz1XMKliwJ0SOKIjBV6wRzuRuguMp0zhx3TmbuWmwxVbodrA6mnkOPL0El2cCJ7+8sRwr4+FgwdSCQIDAQAB",
+  "permissions": ["storage", "alarms", "scripting", "tabs"],
+  "host_permissions": [
+    "https://www.linkedin.com/*"
+  ],
+  "externally_connectable": {
+    "matches": ["https://*.jobseek.ai/*", "https://jobseek.ai/*", "https://jobseek-sigma.vercel.app/*", "http://localhost/*"]
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.linkedin.com/feed/*",
+        "https://www.linkedin.com/jobs/*"
+      ],
+      "js": ["utils/prefilter.js", "utils/dedup.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
