@@ -781,12 +781,45 @@ async function isScanningPaused() {
 //   1. Writing `scrollTop` directly on document.scrollingElement (instant)
 //   2. Dispatching a synthetic 'scroll' event so LinkedIn's listeners react
 //   3. Using longer delays to accommodate background tab timer throttling
-async function autoScrollFeed(steps = 50, stepPx = 800, delayMs = 1400, scrollContainer = null) {
-  const label = scrollContainer ? 'container' : 'window';
-  console.log(`[Jobseek] Auto-scrolling ${label} (${steps} steps × ${stepPx}px)...`);
+// Find every element on the page that actually has a scrollable overflow.
+// LinkedIn's layout changes constantly — sometimes the feed scrolls on
+// document.scrollingElement, sometimes on an inner container. We scroll
+// ALL candidates every step so we don't care which one LinkedIn is using.
+function findScrollableElements() {
+  const candidates = new Set();
+  if (document.scrollingElement) candidates.add(document.scrollingElement);
+  if (document.documentElement) candidates.add(document.documentElement);
+  if (document.body) candidates.add(document.body);
 
-  const scrollEl = scrollContainer || document.scrollingElement || document.documentElement;
-  const eventTarget = scrollContainer || window;
+  // Also look for any explicit LinkedIn layout containers that commonly scroll.
+  document.querySelectorAll(
+    '.scaffold-layout__main, .scaffold-layout, .scaffold-layout__list, ' +
+    'main, [role="main"], .feed-container-theme, .core-rail'
+  ).forEach(el => candidates.add(el));
+
+  // Filter to things that are actually scrollable (have overflow beyond viewport)
+  return Array.from(candidates).filter(el => {
+    if (!el || !el.scrollHeight) return false;
+    return el.scrollHeight > el.clientHeight + 10;
+  });
+}
+
+async function autoScrollFeed(steps = 50, stepPx = 800, delayMs = 1400, scrollContainer = null) {
+  // If caller passed an explicit container (e.g. jobs list), use only that.
+  // Otherwise auto-discover every scrollable element and scroll them all.
+  let targets;
+  if (scrollContainer) {
+    targets = [scrollContainer];
+  } else {
+    targets = findScrollableElements();
+    if (targets.length === 0) {
+      // Fallback — scroll document.scrollingElement blind, better than nothing
+      targets = [document.scrollingElement || document.documentElement];
+    }
+  }
+
+  console.log(`[Jobseek] Auto-scrolling ${targets.length} target(s) (${steps} steps × ${stepPx}px):`,
+    targets.map(t => `${t.tagName}${t.className ? '.' + String(t.className).split(' ')[0] : ''} (scrollH=${t.scrollHeight}, clientH=${t.clientHeight})`));
 
   for (let i = 0; i < steps; i++) {
     if (await isScanningPaused()) {
@@ -794,16 +827,21 @@ async function autoScrollFeed(steps = 50, stepPx = 800, delayMs = 1400, scrollCo
       return;
     }
     // Direct scrollTop assignment works in inactive tabs; scrollBy({behavior:'smooth'}) does not.
-    scrollEl.scrollTop += stepPx;
+    for (const el of targets) {
+      el.scrollTop += stepPx;
+    }
     // Nudge LinkedIn's scroll-based lazy-loader even if IntersectionObserver is throttled.
-    try {
-      eventTarget.dispatchEvent(new Event('scroll', { bubbles: true }));
-    } catch {}
+    // Dispatch on both window and each target.
+    try { window.dispatchEvent(new Event('scroll', { bubbles: true })); } catch {}
+    for (const el of targets) {
+      try { el.dispatchEvent(new Event('scroll', { bubbles: true })); } catch {}
+    }
     await new Promise(r => setTimeout(r, delayMs));
   }
   // Pause at bottom — give LinkedIn time to render the last batch of posts
   await new Promise(r => setTimeout(r, 2000));
-  console.log(`[Jobseek] Auto-scroll complete. Final scrollTop: ${scrollEl.scrollTop}`);
+  console.log(`[Jobseek] Auto-scroll complete. Final scrollTops:`,
+    targets.map(t => `${t.tagName}=${t.scrollTop}`).join(', '));
 }
 
 // ─── Collect unseen posts (without sending yet) ────────────────────────────
