@@ -7,16 +7,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
+  // Proxy (src/proxy.ts) enforces auth + onboarding + intake progression.
+  // Layout just fetches the profile for rendering. Defensive redirect if
+  // the proxy is bypassed for any reason (e.g. local dev without matcher).
   if (!user) redirect('/login')
 
-  const { data } = await supabase
+  const { data: profile } = await supabase
     .from('profiles')
     .select('*')
     .eq('id', user.id)
     .single()
-  const profile = data
-
-  if (!profile?.onboarding_completed) redirect('/intake')
 
   return (
     <div className="flex min-h-screen" style={{ background: 'var(--color-bg)' }}>
