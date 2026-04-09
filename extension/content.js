@@ -185,199 +185,6 @@ function extractFeedPosts() {
   return posts;
 }
 
-// ─── Notifications Extraction ──────────────────────────────────────────────
-
-function extractNotificationPosts() {
-  const posts = [];
-
-  // Strategy 1: DOM-based extraction using notification card elements
-  // LinkedIn changes class names frequently — use a broad set of selectors
-  const cards = document.querySelectorAll(
-    '.nt-card, .notification-card, [data-urn*="notification"], ' +
-    '.artdeco-list__item, .nt-card__content, ' +
-    'section.mn-nt-list li, div[class*="notification"] > div[class*="card"], ' +
-    // Modern LinkedIn notification selectors
-    '[role="article"], [role="listitem"], ' +
-    'li[class*="notification"], li[class*="Notification"], ' +
-    '.artdeco-card, [data-view-name*="notification"], ' +
-    // Ultra-broad: any list item inside main content area
-    'main li, [role="main"] li, .scaffold-layout__main li'
-  );
-
-  if (cards.length > 0) {
-    console.log(`[Jobseek] Found ${cards.length} notification card elements via DOM`);
-    // Filter out tiny/empty cards and cards that are just containers for other matched cards
-    const filteredCards = Array.from(cards).filter(card => {
-      const text = (card.innerText || '').trim();
-      return text.length >= 15 && text.length < 2000; // skip too-short and too-long (wrapper) elements
-    });
-    console.log(`[Jobseek] After filtering: ${filteredCards.length} notification cards with usable text`);
-    filteredCards.forEach(card => {
-      const cardText = (card.innerText || '').trim();
-      if (cardText.length < 15) return;
-
-      // Extract author: look for bold/strong text, profile links, or structured name elements
-      let author = 'Unknown';
-      const boldEl = card.querySelector('strong, .nt-card__text--bold, .t-bold, [class*="text--bold"]');
-      if (boldEl) {
-        author = boldEl.textContent.trim().replace(/,.*$/, '');
-      } else {
-        // Try profile link text
-        const profileLink = card.querySelector('a[href*="/in/"]');
-        if (profileLink) {
-          author = profileLink.textContent.trim().replace(/,.*$/, '');
-        }
-      }
-
-      // Skip if author looks like a timestamp or noise
-      if (/^\d+[mhd]$/.test(author) || author.length < 2) {
-        // Fallback: parse text lines, skip timestamps
-        const lines = cardText.split('\n').map(l => l.trim()).filter(Boolean);
-        for (const line of lines) {
-          if (/^\d+[mhd]$/.test(line)) continue;  // skip "38m", "1h"
-          if (/^(Notification|Settings|Mark|Delete)/i.test(line)) continue;
-          if (line.length >= 3 && line.length <= 80 && /[a-zA-Z]/.test(line)) {
-            author = line.replace(/,.*$/, '').trim();
-            break;
-          }
-        }
-      }
-
-      // Extract timestamp
-      let timeMinutes = 99999;
-      let timeStr = '';
-      const timeEl = card.querySelector('time, .nt-card__time-ago, [class*="time-ago"], [class*="time-badge"]');
-      if (timeEl) {
-        const tText = (timeEl.textContent || timeEl.getAttribute('datetime') || '').trim();
-        const tMatch = tText.match(/(\d+)\s*([mhd])/);
-        if (tMatch) {
-          timeMinutes = tMatch[2] === 'm' ? parseInt(tMatch[1])
-            : tMatch[2] === 'h' ? parseInt(tMatch[1]) * 60
-            : parseInt(tMatch[1]) * 1440;
-          timeStr = `${tMatch[1]}${tMatch[2]} ago`;
-        }
-      }
-      if (!timeStr) {
-        // Fallback: find timestamp in text
-        const tMatch = cardText.match(/(\d+)\s*([mhd])\b/);
-        if (tMatch) {
-          timeMinutes = tMatch[2] === 'm' ? parseInt(tMatch[1])
-            : tMatch[2] === 'h' ? parseInt(tMatch[1]) * 60
-            : parseInt(tMatch[1]) * 1440;
-          timeStr = `${tMatch[1]}${tMatch[2]} ago`;
-        }
-      }
-
-      // Extract author LinkedIn URL from profile links
-      let authorLinkedInUrl = null;
-      const profLink = card.querySelector('a[href*="/in/"]');
-      if (profLink) {
-        try { authorLinkedInUrl = new URL(profLink.href, 'https://www.linkedin.com').href; } catch {}
-      }
-
-      // Extract post URL if notification links to a post
-      let postUrl = null;
-      const postLink = card.querySelector('a[href*="/feed/update/"], a[href*="activity"], a[href*="/posts/"]');
-      if (postLink) {
-        try { postUrl = new URL(postLink.href, 'https://www.linkedin.com').href; } catch {}
-      }
-      // Also check the card itself if it's an anchor
-      if (!postUrl && card.tagName === 'A') {
-        const href = card.getAttribute('href') || '';
-        if (href.includes('/feed/update/') || href.includes('/posts/') || href.includes('activity')) {
-          try { postUrl = new URL(href, 'https://www.linkedin.com').href; } catch {}
-        }
-      }
-
-      // Clean body: remove the author name and timestamp from the beginning
-      const body = cardText.replace(/^\d+[mhd]\s*/, '').slice(0, 1200);
-
-      if (author === 'Unknown' || /^\d+[mhd]$/.test(author)) return; // skip if still no name
-
-      // Detect if this is a company/jobs notification (e.g. "airbnb: new opportunity in India")
-      // vs a person notification (e.g. "John Smith posted about...")
-      // Company job notifications often contain keywords about jobs/opportunities and
-      // the author is a company page, not a person
-      const isJobNotification = /\b(new (?:job|role|opportunity|opening|position)|hiring|is looking for|are hiring|job alert|new opportunities)\b/i.test(body);
-      const companyProfileLink = card.querySelector('a[href*="/company/"]');
-
-      // If a /company/ link exists, use that for the author (more reliable than bold text)
-      let notificationAuthor = author;
-      let notificationAuthorUrl = authorLinkedInUrl;
-      if (companyProfileLink) {
-        const companyText = (companyProfileLink.textContent || '').trim();
-        if (companyText.length > 1) notificationAuthor = companyText;
-        try { notificationAuthorUrl = new URL(companyProfileLink.href, 'https://www.linkedin.com').href; } catch {}
-      }
-
-      posts.push({
-        author: notificationAuthor,
-        title: '',
-        degree: '1st',
-        reactor: null,
-        isReactedPost: false,
-        isPromoted: false,
-        body,
-        timeStr,
-        timeMinutes,
-        source: isJobNotification ? 'NOTIFICATION_JOB_ALERT' : 'NOTIFICATIONS',
-        postUrl,
-        authorLinkedInUrl: notificationAuthorUrl,
-      });
-    });
-  }
-
-  // Strategy 2: Fallback to text-based extraction if DOM selectors found nothing
-  if (posts.length === 0) {
-    const main = document.querySelector('main, [role="main"]');
-    if (!main) return [];
-
-    console.log('[Jobseek] Notification DOM selectors found nothing — falling back to text parsing');
-    const text = main.innerText || '';
-    const blocks = text.split(/\n(?=\d+[mhd]\n|[A-Z][a-z]+ [A-Z][a-z]+,)/);
-
-    blocks.forEach(block => {
-      if (block.length < 20) return;
-
-      const timeMatch = block.match(/(\d+)([mhd])/m);
-      const timeMinutes = timeMatch
-        ? (timeMatch[2] === 'm' ? parseInt(timeMatch[1])
-          : timeMatch[2] === 'h' ? parseInt(timeMatch[1]) * 60
-          : parseInt(timeMatch[1]) * 1440)
-        : 99999;
-
-      // Find the first line that looks like a name (skip timestamps and noise)
-      const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
-      let author = 'Unknown';
-      for (const line of lines) {
-        if (/^\d+[mhd]$/.test(line)) continue;  // skip "38m", "1h", "2d"
-        if (/^(Notification|Settings|Mark|Delete|ago$)/i.test(line)) continue;
-        if (line.length >= 3 && line.length <= 80 && /[a-zA-Z]/.test(line)) {
-          author = line.replace(/,.*$/, '').trim();
-          break;
-        }
-      }
-
-      if (author === 'Unknown' || /^\d+[mhd]$/.test(author)) return;
-
-      posts.push({
-        author,
-        title: '',
-        degree: '1st',
-        reactor: null,
-        isReactedPost: false,
-        isPromoted: false,
-        body: block.slice(0, 1200),
-        timeStr: timeMatch ? `${timeMatch[1]}${timeMatch[2]} ago` : '',
-        timeMinutes,
-        source: 'NOTIFICATIONS',
-      });
-    });
-  }
-
-  return posts;
-}
-
 // ─── Jobs Page Extraction ─────────────────────────────────────────────────
 
 function extractJobPosts() {
@@ -967,25 +774,36 @@ async function isScanningPaused() {
 // Checks the pause flag before every step — stops immediately if paused.
 // If `scrollContainer` is provided, scrolls that element instead of the window
 // (needed for LinkedIn jobs page where the list is in a scrollable div).
+//
+// IMPORTANT: This must work in BACKGROUND (inactive) tabs. Chrome throttles
+// inactive tabs — `behavior: 'smooth'` is ignored and IntersectionObserver
+// callbacks may not fire. We work around this by:
+//   1. Writing `scrollTop` directly on document.scrollingElement (instant)
+//   2. Dispatching a synthetic 'scroll' event so LinkedIn's listeners react
+//   3. Using longer delays to accommodate background tab timer throttling
 async function autoScrollFeed(steps = 50, stepPx = 800, delayMs = 1400, scrollContainer = null) {
-  const target = scrollContainer || window;
   const label = scrollContainer ? 'container' : 'window';
   console.log(`[Jobseek] Auto-scrolling ${label} (${steps} steps × ${stepPx}px)...`);
+
+  const scrollEl = scrollContainer || document.scrollingElement || document.documentElement;
+  const eventTarget = scrollContainer || window;
+
   for (let i = 0; i < steps; i++) {
     if (await isScanningPaused()) {
       console.log(`[Jobseek] Scroll aborted at step ${i} — paused by user`);
       return;
     }
-    if (scrollContainer) {
-      scrollContainer.scrollTop += stepPx;
-    } else {
-      window.scrollBy({ top: stepPx, behavior: 'smooth' });
-    }
+    // Direct scrollTop assignment works in inactive tabs; scrollBy({behavior:'smooth'}) does not.
+    scrollEl.scrollTop += stepPx;
+    // Nudge LinkedIn's scroll-based lazy-loader even if IntersectionObserver is throttled.
+    try {
+      eventTarget.dispatchEvent(new Event('scroll', { bubbles: true }));
+    } catch {}
     await new Promise(r => setTimeout(r, delayMs));
   }
   // Pause at bottom — give LinkedIn time to render the last batch of posts
   await new Promise(r => setTimeout(r, 2000));
-  console.log('[Jobseek] Auto-scroll complete');
+  console.log(`[Jobseek] Auto-scroll complete. Final scrollTop: ${scrollEl.scrollTop}`);
 }
 
 // ─── Collect unseen posts (without sending yet) ────────────────────────────
@@ -1033,51 +851,9 @@ function sendBatch(accumulator, scanMetrics) {
 (async function () {
   const path = window.location.pathname;
 
-  // ── Notifications page ──
+  // Notifications page scanning is intentionally not handled — removed.
   if (path.startsWith('/notifications')) {
-    if (await isScanningPaused()) { console.log('[Jobseek] Notifications scan skipped — paused'); return; }
-
-    // Wait for LinkedIn SPA to render notification cards
-    await new Promise(r => setTimeout(r, 5000));
-
-    // Log page state for debugging
-    const mainEl = document.querySelector('main, [role="main"]');
-    console.log(`[Jobseek] Notifications page URL: ${window.location.href}`);
-    console.log(`[Jobseek] Notifications main element: ${mainEl?.tagName || 'NONE'}, text length: ${(mainEl?.innerText || '').length}`);
-
-    // Light scroll to trigger lazy-loading of more notifications
-    await autoScrollFeed(5, 400, 800);
-
-    // Extract notification cards and separate: ones with post URLs (open & evaluate)
-    // vs ones without (classify from notification text directly)
-    const rawPosts = extractNotificationPosts();
-    const withPostUrl = [];
-    const withoutPostUrl = [];
-
-    for (const post of rawPosts) {
-      if (post.postUrl && (post.postUrl.includes('/feed/update/') || post.postUrl.includes('/posts/'))) {
-        withPostUrl.push(post);
-      } else {
-        withoutPostUrl.push(post);
-      }
-    }
-
-    console.log(`[Jobseek] Notifications: ${rawPosts.length} total, ${withPostUrl.length} with post URLs (will open), ${withoutPostUrl.length} direct`);
-
-    // Send notifications WITHOUT post URLs for direct classification
-    const collected = new Map();
-    await collectUnseen(withoutPostUrl, collected);
-    sendBatch(collected);
-
-    // Send post URLs to background to open and evaluate the full posts
-    if (withPostUrl.length > 0) {
-      const postUrls = withPostUrl
-        .map(p => p.postUrl)
-        .filter((url, i, arr) => arr.indexOf(url) === i) // dedupe
-        .slice(0, 10); // cap at 10 to avoid opening too many tabs
-      console.log(`[Jobseek] Sending ${postUrls.length} notification post URLs to background for full evaluation`);
-      chrome.runtime.sendMessage({ action: 'NOTIFICATION_POSTS_TO_OPEN', postUrls });
-    }
+    console.log('[Jobseek] Notifications page — scanning disabled, skipping');
     return;
   }
 
@@ -1168,6 +944,14 @@ function sendBatch(accumulator, scanMetrics) {
     scanMetrics.postsAfterPrefilter += r.filtered;
     scanMetrics.postsAfterDedup += r.added;
   }
+
+  // Wait for LinkedIn's SPA to render the feed. In background/inactive tabs
+  // LinkedIn takes longer to hydrate — a short wait before the first extract
+  // dramatically reduces "0 extracted" scans on freshly opened silent tabs.
+  const initialFeed = document.querySelector('.scaffold-layout__main, main, [role="main"]');
+  const initialFeedText = (initialFeed?.innerText || '').length;
+  console.log(`[Jobseek] Feed page URL: ${window.location.href}, initial main text length: ${initialFeedText}`);
+  await new Promise(r => setTimeout(r, 4000));
 
   // ── Step 1: Initial scan of whatever is currently in the DOM ──
   const initial = extractFeedPosts();

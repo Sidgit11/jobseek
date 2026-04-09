@@ -543,16 +543,11 @@ chrome.runtime.onMessage.addListener((message, sender) => {
       handleProfileData(message.profile, message.profileUrl, sender.tab?.id);
     }
   }
-  if (message.action === 'NOTIFICATION_POSTS_TO_OPEN' && message.postUrls?.length > 0) {
-    // Notification agent: open linked posts to evaluate their full content
-    console.log(`[Jobseek BG] Opening ${message.postUrls.length} notification-linked posts for evaluation`);
-    openNotificationPosts(message.postUrls);
-  }
 });
 
 // Job-source posts bypass Gemini — they're already job listings, no classification needed.
 // LinkedIn's recommended jobs algorithm already filtered for relevance.
-const JOB_SOURCES = new Set(['JOBS', 'FEED_JOBS_WIDGET', 'NOTIFICATION_JOB_ALERT']);
+const JOB_SOURCES = new Set(['JOBS', 'FEED_JOBS_WIDGET']);
 
 async function flushBatch(posts, scanMetrics) {
   if (!posts || posts.length === 0) return;
@@ -986,99 +981,6 @@ async function processNextEnrichment() {
   }
 }
 
-// ── Notification Agent — open linked posts for full evaluation ─────────────
-// When notifications link to actual posts (e.g. "X posted about..."), we open
-// each post URL in a background tab, inject content.js to extract the full
-// feed post, and classify THAT instead of the notification snippet.
-
-const NOTIFICATION_POST_TIMEOUT = 20_000; // 20s per post tab
-const NOTIFICATION_POST_MAX_CONCURRENT = 3;
-
-async function openNotificationPosts(postUrls) {
-  // Process in small batches to avoid overwhelming the browser
-  for (let i = 0; i < postUrls.length; i += NOTIFICATION_POST_MAX_CONCURRENT) {
-    const batch = postUrls.slice(i, i + NOTIFICATION_POST_MAX_CONCURRENT);
-    await Promise.all(batch.map(url => openAndEvaluatePost(url)));
-    // Small gap between batches
-    if (i + NOTIFICATION_POST_MAX_CONCURRENT < postUrls.length) {
-      await new Promise(r => setTimeout(r, 2000));
-    }
-  }
-}
-
-async function openAndEvaluatePost(postUrl) {
-  return new Promise(async (resolve) => {
-    try {
-      const tab = await chrome.tabs.create({ url: postUrl, active: false });
-      console.log(`[Jobseek BG] Opened notification post tab ${tab.id}: ${postUrl}`);
-
-      let resolved = false;
-      const cleanup = () => {
-        if (resolved) return;
-        resolved = true;
-        chrome.tabs.remove(tab.id).catch(() => {});
-        resolve();
-      };
-
-      // Hard timeout — close tab no matter what
-      const hardTimeout = setTimeout(() => {
-        console.warn(`[Jobseek BG] Notification post tab ${tab.id} timed out — closing`);
-        cleanup();
-      }, NOTIFICATION_POST_TIMEOUT);
-
-      // Wait for page load, then inject content.js to extract the post
-      const onUpdated = (updatedTabId, info) => {
-        if (updatedTabId !== tab.id || info.status !== 'complete') return;
-        chrome.tabs.onUpdated.removeListener(onUpdated);
-
-        // Small delay for LinkedIn JS to render the post
-        setTimeout(() => {
-          chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            files: ['utils/prefilter.js', 'utils/dedup.js', 'content.js'],
-          }).then(() => {
-            console.log(`[Jobseek BG] Injected content.js into notification post tab ${tab.id}`);
-            // Give content.js time to extract and send posts, then close
-            setTimeout(() => {
-              clearTimeout(hardTimeout);
-              cleanup();
-            }, 8000);
-          }).catch(err => {
-            console.error(`[Jobseek BG] Failed to inject into notification post tab:`, err.message);
-            clearTimeout(hardTimeout);
-            cleanup();
-          });
-        }, 2500);
-      };
-
-      chrome.tabs.onUpdated.addListener(onUpdated);
-
-      // Fallback: if onUpdated never fires 'complete' (SPA navigation), inject after 8s
-      setTimeout(() => {
-        if (resolved) return;
-        chrome.tabs.onUpdated.removeListener(onUpdated);
-        console.log(`[Jobseek BG] Notification post tab ${tab.id} — fallback injection (no 'complete' event)`);
-        chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          files: ['utils/prefilter.js', 'utils/dedup.js', 'content.js'],
-        }).then(() => {
-          setTimeout(() => {
-            clearTimeout(hardTimeout);
-            cleanup();
-          }, 8000);
-        }).catch(() => {
-          clearTimeout(hardTimeout);
-          cleanup();
-        });
-      }, 8000);
-
-    } catch (err) {
-      console.error('[Jobseek BG] Failed to open notification post:', err.message);
-      resolve();
-    }
-  });
-}
-
 // ── Periodic background scan ───────────────────────────────────────────────
 // Fires every 30 minutes. If LinkedIn is already open in any tab, re-injects
 // the content script to pick up new posts. If not, silently opens a LinkedIn
@@ -1116,7 +1018,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 // ── Multi-page scan pipeline ─────────────────────────────────────────────
-// Visits feed → notifications → jobs sequentially.
+// Visits feed → jobs sequentially.
 // Uses alarms for step sequencing so it survives service worker restarts.
 // Scan state is persisted in chrome.storage.local.
 
@@ -1159,12 +1061,12 @@ async function runScan() {
     }).catch(err => {
       console.error('[Jobseek BG] Failed to inject into user feed tab:', err.message);
     });
-    // ALSO scan notifications + jobs in a SEPARATE background tab (skip feed since user's tab handles it)
-    console.log('[Jobseek BG] Starting notifications + jobs scan in background tab');
-    startScanPipeline(1); // start from step 1 (notifications), skip feed
+    // ALSO scan jobs in a SEPARATE background tab (skip feed since user's tab handles it)
+    console.log('[Jobseek BG] Starting jobs scan in background tab');
+    startScanPipeline(1); // start from step 1 (jobs), skip feed
   } else {
     // No LinkedIn tab open — full multi-page silent scan
-    console.log('[Jobseek BG] Starting multi-page silent scan: feed → notifications → jobs');
+    console.log('[Jobseek BG] Starting multi-page silent scan: feed → jobs');
     startScanPipeline(0); // start from step 0 (feed)
   }
 }
